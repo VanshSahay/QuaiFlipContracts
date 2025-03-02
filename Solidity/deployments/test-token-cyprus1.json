@@ -1,0 +1,10 @@
+{
+  "name": "Uniswap Test Token",
+  "symbol": "UNI-TEST",
+  "address": "0x00558615Ef7F5E7E05Cb69cDd63DE1ae39E8964B",
+  "initialSupply": "10000000000000000000000000",
+  "network": "cyprus1",
+  "chainId": 15000,
+  "deployedAt": "2025-02-28T23:38:21.718Z",
+  "ipfsHash": "QmYwAPJzv5CZsnA625s3Xf2nemtYgPpHdWEz79ojWnPbdG"
+}

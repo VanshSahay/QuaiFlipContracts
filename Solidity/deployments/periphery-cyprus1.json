@@ -1,0 +1,10 @@
+{
+  "network": "cyprus1",
+  "chainId": 15000,
+  "factoryAddress": "0x002457fd64cFB6F0A21345380E373A6CFA7eAfD8",
+  "wethAddress": "0x00168E35F6cc8DC240FC74EBa0E1c41712E34E87",
+  "positionDescriptorAddress": "0x00432801006F631D59F0405dbc70FcC963aD59aC",
+  "positionManagerAddress": "0x007249e46B49b5638dC89a6992007448C633df68",
+  "routerAddress": "0x0079292016D5179F806fBbC897154f6Ea4CCb70A",
+  "timestamp": "2025-03-02T02:21:10.390Z"
+}

@@ -1,32 +1,75 @@
-## hardhat-example
+# QuaiFlip
+## Uniswap V3 Modifications for Quai Network
 
-`hardhat-example` provides a simple smart contract deployment framework using the Hardhat development kit on Quai Network using either **Solidity or SolidityX**.
+This document outlines the modifications made to Uniswap V3 contracts to support deployment on Quai Network's sharded architecture.
 
-### Solidity vs. SolidityX
+### Overview
 
-You can deploy smart contracts to Quai Network using either regular Solidity or the Quai Network specific SolidityX. The primary difference between the two is that SolidityX supports additional [cross-chain features](https://docs.qu.ai/build/smart-contracts/opcode-additions). You can read more about the differences between Solidity and SolidityX [here](https://docs.qu.ai/build/smart-contracts/languages/overview).
+Quai Network has a unique sharded architecture that requires contracts to be deployed with specific address patterns to ensure they reside in the correct shard. Specifically, contract addresses must have:
 
-### How do I choose which one to use?
+- First byte = `0x00`
+- Second byte ≤ `0x7F` (127 in decimal)
 
-**Solidity:**
+To achieve this, we've implemented "address grinding" in the contracts that use the CREATE2 opcode.
 
-- **Recommended for developers new to Quai Network**
-- Single chain deployments without cross-chain functionality
-- Easier to use, deploy, and test + compatible with existing Solidity tooling
-- Supports any previously existing Solidity compiler version
-- Can utilize pre-existing Solidity contract libraries like [`@openzeppelin/contracts`](https://www.npmjs.com/package/@openzeppelin/contracts).
-- Recommended for most use cases
+### Modified Files
 
-**SolidityX:**
+#### v3-core/contracts/UniswapV3PoolDeployer.sol
 
-- **Recommended for more advanced developers looking to experiment with cross-chain functionality**
-- Enables cross-chain contract deployments
-- Requires a different compiler and additional configuration (more difficult to configure)
-- Not compatible with pre-existing Solidity contract libraries.
-- Will be forward compatible with [dynamic scaling events](https://docs.qu.ai/learn/advanced-introduction/poem/infinite-execution-shards/dynamic-sharding)
+- Added `findSaltForAddress` function to find a salt that results in a contract address with the required pattern
+- Added `computeAddress` function to pre-compute what address would result from a given salt
+- Modified the `deploy` function to use address grinding when creating pools
 
-### Start Developing
+#### v3-core/contracts/test/MockTimeUniswapV3PoolDeployer.sol
 
-To get started with Solidity contract deployments, navigate to the `Solidity` directory and checkout the [Solidity directory README.md](./Solidity/README.md).
+- Similar modifications as the main deployer for consistency in tests
 
-To get started with SolidityX contract deployments, navigate to the `SolidityX` directory and checkout the [SolidityX directory README.md](./SolidityX/README.md).
+#### v3-periphery/contracts/libraries/PoolAddress.sol
+
+- Added a helper function `isQuaiCompatibleAddress` to check if an address fits Quai Network's requirements
+- Updated comments in `computeAddress` to warn that the actual address may be different due to address grinding
+
+#### Solidity/scripts/uniswapExamples.js
+
+- Updated the `createUniswapPool` function to add explanations about address grinding
+- Added verification to check if deployed pool addresses are in the correct range for Quai Network
+
+### How It Works
+
+1. When deploying a pool, instead of using the standard salt (hash of tokens and fee), we:
+   - Start with the standard salt
+   - Calculate what address would result from using this salt
+   - If the address doesn't match Quai Network requirements, increment the salt and try again
+   - Continue until we find a salt that results in an address with the correct pattern
+   - Use this salt with CREATE2 to deploy the contract
+
+2. This ensures all deployed contracts have addresses compatible with Quai Network's sharding.
+
+### Important Notes
+
+- Address prediction in periphery contracts is approximate since the actual address depends on the ground salt
+- For accurate pool addresses, always query the factory using `getPool(token0, token1, fee)`
+- The grinding process can increase gas costs for deployment, but this only affects contract creation, not interactions
+
+### Deployment & Testing
+
+To deploy and test the modified Uniswap V3 contracts on Quai Network, follow these steps:
+
+1. Ensure you are in the correct directory:
+```shell
+cd QuaiFlip/Contracts/Solidity
+```
+2. Compile the contracts:
+```shell
+# Compile the contracts
+node scripts/compileUniswapV3.js
+```
+3. Deploy all contracts:
+```shell
+# Deploy all contracts
+npx hardhat run scripts/deployUniswapV3Full.js --network cyprus1
+```
+4. Test the deployment:
+```shell
+npx hardhat uniswap-two-tokens --network cyprus1 
+```
