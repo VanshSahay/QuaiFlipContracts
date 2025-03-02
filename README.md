@@ -1,4 +1,4 @@
-# QuaiFlip
+# QuaiFlipContracts
 ## Uniswap V3 Modifications for Quai Network
 
 This document outlines the modifications made to Uniswap V3 contracts to support deployment on Quai Network's sharded architecture.
