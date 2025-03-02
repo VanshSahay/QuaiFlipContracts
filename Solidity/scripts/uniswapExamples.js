@@ -24,6 +24,7 @@ const UniswapV3FactoryABI = require('../../v3-core/artifacts/contracts/UniswapV3
 const NonfungiblePositionManagerABI = require('../../v3-periphery/artifacts/contracts/NonfungiblePositionManager.sol/NonfungiblePositionManager.json').abi;
 const SwapRouterABI = require('../../v3-periphery/artifacts/contracts/SwapRouter.sol/SwapRouter.json').abi;
 const WETH9ABI = require('../artifacts/contracts/WETH9.sol/WETH9.json').abi;
+const IUniswapV3PoolABI = require('../../v3-core/artifacts/contracts/interfaces/IUniswapV3Pool.sol/IUniswapV3Pool.json').abi;
 
 // Basic ERC20 ABI for tokens that might not have a full ABI available
 const ERC20_ABI = [
@@ -277,72 +278,77 @@ async function createUniswapPool(token1Address, token2Address) {
  */
 async function addLiquidity(poolInfo) {
     console.log('\n---- Example 3: Adding Liquidity to a Pool ----');
-
-    if (!poolInfo || !poolInfo.token0 || !poolInfo.token1) {
-        console.error('Error: Pool information is required.');
-        return;
-    }
-
-    const wallet = getWallet();
-    const { token0, token1, fee } = poolInfo;
-
     console.log(poolInfo);
 
-    // Create contract instances with full ABIs
+    const { poolAddress, token0, token1, fee } = poolInfo;
+    const wallet = getWallet();
+
     const token0Contract = new quais.Contract(token0, token0 === WETH_ADDRESS ? WETH9ABI : ERC20_ABI, wallet);
     const token1Contract = new quais.Contract(token1, token1 === WETH_ADDRESS ? WETH9ABI : ERC20_ABI, wallet);
     const positionManager = new quais.Contract(POSITION_MANAGER_ADDRESS, NonfungiblePositionManagerABI, wallet);
+    const poolContract = new quais.Contract(poolAddress, IUniswapV3PoolABI, wallet);
 
-    // Amount of tokens to add as liquidity
-    const amount0 = quais.parseUnits("100", 18);
-    const amount1 = quais.parseUnits("100", 18);
+    // Check token decimals
+    const token0Decimals = await token0Contract.decimals();
+    const token1Decimals = await token1Contract.decimals();
+    console.log(`Token0 decimals: ${token0Decimals}, Token1 decimals: ${token1Decimals}`);
 
-    console.log(`Adding liquidity:`);
-    console.log(`- Token0 (${token0}): ${quais.formatUnits(amount0, 18)}`);
-    console.log(`- Token1 (${token1}): ${quais.formatUnits(amount1, 18)}`);
-
-    // Approve the position manager to spend tokens
+    // Approve tokens
     console.log('Approving tokens for PositionManager...');
-
-    let tx = await token0Contract.approve(POSITION_MANAGER_ADDRESS, amount0);
+    let tx = await token0Contract.approve(POSITION_MANAGER_ADDRESS, quais.parseUnits("10000", token0Decimals));
     console.log(`Token0 approval tx: ${tx.hash}`);
     await tx.wait();
-
-    tx = await token1Contract.approve(POSITION_MANAGER_ADDRESS, amount1);
+    tx = await token1Contract.approve(POSITION_MANAGER_ADDRESS, quais.parseUnits("10000", token1Decimals));
     console.log(`Token1 approval tx: ${tx.hash}`);
     await tx.wait();
 
-    // For simplicity, use the full tick range
-    // In production, you'd want to define a specific price range
-    const MIN_TICK = -887272;
-    const MAX_TICK = 887272;
+    // Check pool state
+    const slot0 = await poolContract.slot0();
+    console.log(`Current tick: ${slot0.tick}, sqrtPriceX96: ${slot0.sqrtPriceX96.toString()}`);
 
-    // Prepare the mint parameters
+    // Use a narrower tick range
+    const TICK_SPACING = 60;
+    const tickLower = -60;
+    const tickUpper = 60;
+
+    // Use larger amounts
+    const amount0Desired = quais.parseUnits("10000", token0Decimals);
+    const amount1Desired = quais.parseUnits("10000", token1Decimals);
+    const amount0Min = quais.parseUnits(
+        (Number(quais.formatUnits(amount0Desired, token0Decimals)) * 0.95).toFixed(Number(token0Decimals)),
+        token0Decimals
+    );
+    const amount1Min = quais.parseUnits(
+        (Number(quais.formatUnits(amount1Desired, token1Decimals)) * 0.95).toFixed(Number(token1Decimals)),
+        token1Decimals
+    );
+
+    console.log(`Adding liquidity: ${quais.formatUnits(amount0Desired, token0Decimals)} of Token0, ${quais.formatUnits(amount1Desired, token1Decimals)} of Token1`);
+    console.log(`Tick range: ${tickLower} to ${tickUpper}`);
+
     const mintParams = {
         token0: token0,
         token1: token1,
         fee: fee,
-        tickLower: MIN_TICK,
-        tickUpper: MAX_TICK,
-        amount0Desired: amount0,
-        amount1Desired: amount1,
-        amount0Min: 0,  // In production, set a minimum to prevent slippage
-        amount1Min: 0,  // In production, set a minimum to prevent slippage
+        tickLower: tickLower,
+        tickUpper: tickUpper,
+        amount0Desired: amount0Desired,
+        amount1Desired: amount1Desired,
+        amount0Min: amount0Min,
+        amount1Min: amount1Min,
         recipient: wallet.address,
-        deadline: Math.floor(Date.now() / 1000) + 60 * 20  // 20 minutes from now
+        deadline: Math.floor(Date.now() / 1000) + 60 * 20
     };
 
     try {
-        console.log('Adding liquidity to the pool...');
+        console.log('Adding liquidity...');
         const tx = await positionManager.mint(mintParams, { gasLimit: 5000000 });
         console.log(`Transaction hash: ${tx.hash}`);
-
         const receipt = await tx.wait();
         console.log(`Liquidity added successfully!`);
-
         return receipt;
     } catch (error) {
-        console.error('Error adding liquidity:', error);
+        console.error('Error adding liquidity:', error.message, error.data);
         throw error;
     }
 }
