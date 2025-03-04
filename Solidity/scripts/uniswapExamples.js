@@ -251,6 +251,9 @@ async function createUniswapPool(token1Address, token2Address) {
     const factory = new quais.Contract(FACTORY_ADDRESS, UniswapV3FactoryABI, wallet);
     const positionManager = new quais.Contract(POSITION_MANAGER_ADDRESS, NonfungiblePositionManagerABI, wallet);
 
+    // Ensure the address grinder is set in the factory
+    await ensureAddressGrinderIsSet(factory, wallet);
+
     // Determine token order (Uniswap requires token0 < token1)
     let token0, token1;
     if (token1Address.toLowerCase() < token2Address.toLowerCase()) {
@@ -293,12 +296,17 @@ async function createUniswapPool(token1Address, token2Address) {
 
     try {
         console.log(`Creating and initializing pool...`);
+
+        // Increase gas limit significantly for complex deployment with grinding
+        const gasLimit = 12000000; // Increased from 5000000
+        console.log(`Using gas limit: ${gasLimit}`);
+
         const tx = await positionManager.createAndInitializePoolIfNecessary(
             token0,
             token1,
             fee,
             sqrtPriceX96,
-            { gasLimit: 5000000 }
+            { gasLimit: gasLimit }
         );
 
         console.log(`Transaction hash: ${tx.hash}`);
@@ -327,6 +335,45 @@ async function createUniswapPool(token1Address, token2Address) {
         };
     } catch (error) {
         console.error('Error creating pool:', error);
+        throw error;
+    }
+}
+
+/**
+ * Helper function to ensure the address grinder is set in the factory
+ */
+async function ensureAddressGrinderIsSet(factory, wallet) {
+    try {
+        // Check if the address grinder is set
+        const currentGrinder = await factory.addressGrinder();
+
+        if (currentGrinder === '0x0000000000000000000000000000000000000000') {
+            console.log('AddressGrinder not set in factory. Setting it now...');
+
+            // Create the UniswapAddressGrinder contract instance
+            const uniswapAddressGrinder = new quais.Contract(
+                UNISWAP_ADDRESS_GRINDER_ADDRESS,
+                UniswapAddressGrinderABI,
+                wallet
+            );
+
+            // Set the address grinder in the factory
+            const tx = await factory.setAddressGrinder(UNISWAP_ADDRESS_GRINDER_ADDRESS);
+            await tx.wait();
+            console.log(`AddressGrinder set in factory: ${UNISWAP_ADDRESS_GRINDER_ADDRESS}`);
+        } else if (currentGrinder.toLowerCase() !== UNISWAP_ADDRESS_GRINDER_ADDRESS.toLowerCase()) {
+            console.log(`Warning: Factory has a different AddressGrinder set (${currentGrinder}) than expected (${UNISWAP_ADDRESS_GRINDER_ADDRESS})`);
+            console.log('Updating to the expected AddressGrinder...');
+
+            // Set the address grinder in the factory
+            const tx = await factory.setAddressGrinder(UNISWAP_ADDRESS_GRINDER_ADDRESS);
+            await tx.wait();
+            console.log(`AddressGrinder updated in factory: ${UNISWAP_ADDRESS_GRINDER_ADDRESS}`);
+        } else {
+            console.log(`AddressGrinder already set correctly in factory: ${currentGrinder}`);
+        }
+    } catch (error) {
+        console.error('Error checking/setting address grinder:', error);
         throw error;
     }
 }
@@ -566,22 +613,40 @@ async function performSwap(poolInfo) {
  * Run all examples in a complete workflow
  */
 async function runCompleteWorkflow() {
-    try {
-        console.log('\n==== RUNNING COMPLETE UNISWAP V3 WORKFLOW ====');
+    console.log('\n===== Running Complete Uniswap Workflow =====');
+    console.log('This will run through a complete example of Uniswap v3 functionality:');
+    console.log('1. Deploying a test token');
+    console.log('2. Wrapping QAI to WETH');
+    console.log('3. Creating a pool');
+    console.log('4. Adding liquidity');
+    console.log('5. Performing a swap');
+    console.log('------------------------------------------------');
 
-        // 1. First, wrap QAI to get WQAI
+    try {
+        // Step 1: Deploy a test token
+        const tokenInfo = await deployTestToken("QuaiCoin", "QCN", "10000000");
+        if (!tokenInfo) {
+            console.error('Failed to deploy test token. Exiting workflow.');
+            return;
+        }
+
+        // Get and check factory contract
+        const wallet = getWallet();
+        const factory = new quais.Contract(FACTORY_ADDRESS, UniswapV3FactoryABI, wallet);
+
+        // Ensure the address grinder is set in the factory before proceeding
+        await ensureAddressGrinderIsSet(factory, wallet);
+
+        // Step 2: Wrap QAI to get WETH
         await wrapQAI();
 
-        // 2. Deploy a test token
-        const testTokenAddress = await deployTestToken();
+        // Step 3: Create a pool with the test token
+        const poolInfo = await createUniswapPool(tokenInfo);
 
-        // 3. Create a pool with the test token
-        const poolInfo = await createUniswapPool(testTokenAddress);
-
-        // 4. Add liquidity to the pool
+        // Step 4: Add liquidity to the pool
         await addLiquidity(poolInfo);
 
-        // 5. Perform a swap
+        // Step 5: Perform a swap
         await performSwap(poolInfo);
 
         console.log('\n==== WORKFLOW COMPLETED SUCCESSFULLY ====');
@@ -594,24 +659,43 @@ async function runCompleteWorkflow() {
  * Run all examples in a complete workflow with two custom tokens
  */
 async function runCompleteWorkflowWithTwoTokens() {
+    console.log('\n===== Running Complete Uniswap Workflow with Two Test Tokens =====');
+    console.log('This will run through a complete example of Uniswap v3 functionality:');
+    console.log('1. Deploying two test tokens');
+    console.log('2. Creating a pool between them');
+    console.log('3. Adding liquidity');
+    console.log('4. Performing a swap');
+    console.log('------------------------------------------------');
+
     try {
-        console.log('\n==== RUNNING COMPLETE UNISWAP V3 WORKFLOW WITH TWO CUSTOM TOKENS ====');
+        // Step 1: Deploy two test tokens
+        console.log('Deploying two test tokens...');
+        const token1Info = await deployTestToken("QuaiCoin", "QCN", "10000000");
+        if (!token1Info) {
+            console.error('Failed to deploy first test token. Exiting workflow.');
+            return;
+        }
 
-        // 1. Deploy two test tokens
-        console.log('\n1. Deploying two test tokens...');
-        const token1Address = await deployTestToken("Token A", "TKNA", "1000000");
-        const token2Address = await deployTestToken("Token B", "TKNB", "1000000");
+        const token2Info = await deployTestToken("QuaiUSD", "QUSD", "10000000");
+        if (!token2Info) {
+            console.error('Failed to deploy second test token. Exiting workflow.');
+            return;
+        }
 
-        // 2. Create a pool with the two test tokens
-        console.log('\n2. Creating a pool between the two tokens...');
-        const poolInfo = await createUniswapPool(token1Address, token2Address);
+        // Get and check factory contract
+        const wallet = getWallet();
+        const factory = new quais.Contract(FACTORY_ADDRESS, UniswapV3FactoryABI, wallet);
 
-        // 3. Add liquidity to the pool
-        console.log('\n3. Adding liquidity to the pool...');
+        // Ensure the address grinder is set in the factory before proceeding
+        await ensureAddressGrinderIsSet(factory, wallet);
+
+        // Step 2: Create a pool between the two tokens
+        const poolInfo = await createUniswapPool(token1Info, token2Info);
+
+        // Step 3: Add liquidity to the pool
         await addLiquidity(poolInfo);
 
-        // 4. Perform a swap
-        console.log('\n4. Performing a swap between tokens...');
+        // Step 4: Perform a swap
         await performSwap(poolInfo);
 
         console.log('\n==== WORKFLOW COMPLETED SUCCESSFULLY ====');

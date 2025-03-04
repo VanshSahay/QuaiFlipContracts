@@ -104,11 +104,15 @@ async function deployUniswapV3Core(uniswapAddressGrinderContract, provider, wall
     // Use a random salt or a deterministic one
     const salt = quais.keccak256(quais.toUtf8Bytes('UNISWAP_FACTORY_SALT_' + Date.now()))
 
+    // Process the bytecode properly before deployment if needed
+    const processedBytecode = processBytecodeForDeployment(UniswapV3FactoryArtifact.bytecode)
+
     // Deploy Factory using the grinder
     const tx = await uniswapAddressGrinderContract.deployContract(
-        UniswapV3FactoryArtifact.bytecode,
+        processedBytecode,
         constructorArgs,
         salt,
+        { gasLimit: 8000000 } // Increased gas limit for complex deployment
     )
     const receipt = await tx.wait()
 
@@ -118,6 +122,18 @@ async function deployUniswapV3Core(uniswapAddressGrinderContract, provider, wall
     console.log(`UniswapV3Factory deployed to: ${factoryAddress}`)
     // Verify the address is Quai compatible
     await verifyQuaiAddress(factoryAddress)
+
+    // Now set the address grinder in the factory (since it inherits from UniswapV3PoolDeployer)
+    console.log(`Setting UniswapAddressGrinder in the factory...`)
+    const factory = new quais.Contract(factoryAddress, UniswapV3FactoryArtifact.abi, wallet)
+
+    // Get the address of the uniswapAddressGrinderContract
+    const grinderAddress = await uniswapAddressGrinderContract.getAddress()
+
+    // Set the address grinder in the factory
+    const setGrinderTx = await factory.setAddressGrinder(grinderAddress)
+    await setGrinderTx.wait()
+    console.log(`UniswapAddressGrinder set in the factory: ${grinderAddress}`)
 
     return factoryAddress
 }
@@ -194,7 +210,7 @@ async function deployUniswapV3Periphery(uniswapAddressGrinderContract, factoryAd
 
 
 
-    // Process the linked bytecode to ensure it’s valid for deployment.
+    // Process the linked bytecode to ensure it's valid for deployment.
     const processedPositionDescriptorBytecode = processBytecodeForDeployment(unlinkedBytecode);
 
     console.log('Deploying NonfungibleTokenPositionDescriptor with constructor args:', positionDescriptorConstructorArgs)
@@ -307,6 +323,7 @@ async function deployUniswapV3Full() {
     // Step 0: Deploy UniswapAddressGrinder
     console.log('Step 0: Deploying UniswapAddressGrinder...')
     const uniswapAddressGrinderAddress = await deployUniswapAddressGrinder()
+    console.log(`UniswapAddressGrinder deployed at: ${uniswapAddressGrinderAddress}`)
 
     // Get UniswapAddressGrinder contract instance
     const uniswapAddressGrinderArtifact = require('../artifacts/contracts/UniswapAddressGrinder.sol/UniswapAddressGrinder.json')

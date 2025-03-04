@@ -14,14 +14,23 @@ contract UniswapAddressGrinder {
   /// @param initCodeHash The hash of the init code for the contract to deploy
   /// @param startingSalt The initial salt value to start searching from
   /// @return A salt value that will result in a Quai-compatible address
-  function findSaltForAddress(bytes32 initCodeHash, bytes32 startingSalt) public view returns (bytes32) {
-    bytes32 salt = startingSalt;
+  function findSaltForAddress(bytes32 initCodeHash, bytes32 startingSalt) external view returns (bytes32) {
+    return _findSaltForAddress(initCodeHash, startingSalt);
+  }
 
-    for (uint256 i = 0; i < 10000000; i++) {
-      address computedAddress = computeAddress(salt, initCodeHash);
+  /// @notice Internal implementation of salt finding to avoid inlining in external calls
+  /// @param initCodeHash The hash of the init code for the contract to deploy
+  /// @param startingSalt The initial salt value to start searching from
+  /// @return A salt value that will result in a Quai-compatible address
+  function _findSaltForAddress(bytes32 initCodeHash, bytes32 startingSalt) internal view returns (bytes32) {
+    bytes32 salt = startingSalt;
+    uint256 maxIterations = 100000000;
+
+    for (uint256 i = 0; i < maxIterations; i++) {
+      address computedAddress = _computeAddress(salt, initCodeHash);
 
       // Check if the first byte is 0x00 and the second byte is <= 127
-      if (uint8(uint160(computedAddress) >> 152) == 0x00 && uint8(uint160(computedAddress) >> 144) <= 127) {
+      if (_isQuaiCompatibleAddress(computedAddress)) {
         return salt;
       }
       // Increment the salt by adding 1 (will wrap around if it exceeds 256-bit size)
@@ -36,7 +45,15 @@ contract UniswapAddressGrinder {
   /// @param salt The salt value to use in the CREATE2 operation
   /// @param initCodeHash The hash of the init code for the contract to be deployed
   /// @return The address the contract will be deployed to
-  function computeAddress(bytes32 salt, bytes32 initCodeHash) public view returns (address) {
+  function computeAddress(bytes32 salt, bytes32 initCodeHash) external view returns (address) {
+    return _computeAddress(salt, initCodeHash);
+  }
+
+  /// @notice Internal implementation of address computation to avoid inlining
+  /// @param salt The salt value to use in the CREATE2 operation
+  /// @param initCodeHash The hash of the init code for the contract to be deployed
+  /// @return The address the contract will be deployed to
+  function _computeAddress(bytes32 salt, bytes32 initCodeHash) internal view returns (address) {
     // Calculate the address using the same formula as CREATE2
     bytes32 hash = keccak256(
       abi.encodePacked(
@@ -54,7 +71,14 @@ contract UniswapAddressGrinder {
   /// @notice Checks if an address is compatible with Quai Network's sharding requirements
   /// @param addr The address to check
   /// @return True if the address is compatible (first byte 0x00 and second byte <= 127)
-  function isQuaiCompatibleAddress(address addr) public pure returns (bool) {
+  function isQuaiCompatibleAddress(address addr) external pure returns (bool) {
+    return _isQuaiCompatibleAddress(addr);
+  }
+
+  /// @notice Internal implementation of Quai address compatibility check
+  /// @param addr The address to check
+  /// @return True if the address is compatible (first byte 0x00 and second byte <= 127)
+  function _isQuaiCompatibleAddress(address addr) internal pure returns (bool) {
     return uint8(uint160(addr) >> 152) == 0x00 && uint8(uint160(addr) >> 144) <= 127;
   }
 
@@ -71,7 +95,7 @@ contract UniswapAddressGrinder {
     bytes32 initCodeHash = keccak256(initCode);
 
     // Find a salt that will generate a Quai-compatible address
-    bytes32 groundSalt = findSaltForAddress(initCodeHash, salt);
+    bytes32 groundSalt = _findSaltForAddress(initCodeHash, salt);
 
     // Deploy contract using CREATE2 with the ground salt
     assembly {
@@ -82,7 +106,7 @@ contract UniswapAddressGrinder {
     require(deployedAddress != address(0), 'UniswapAddressGrinder: Contract deployment failed');
 
     // Verify the deployed address is Quai-compatible
-    require(isQuaiCompatibleAddress(deployedAddress), 'UniswapAddressGrinder: Deployed address not compatible with Quai Network');
+    require(_isQuaiCompatibleAddress(deployedAddress), 'UniswapAddressGrinder: Deployed address not compatible with Quai Network');
 
     // Emit the ContractDeployed event
     emit ContractDeployed(deployedAddress, groundSalt);
@@ -103,9 +127,9 @@ contract UniswapAddressGrinder {
     bytes32 initCodeHash = keccak256(initCode);
 
     // Find a salt that will generate a Quai-compatible address
-    bytes32 groundSalt = findSaltForAddress(initCodeHash, salt);
+    bytes32 groundSalt = _findSaltForAddress(initCodeHash, salt);
 
     // Predict the deployment address
-    return computeAddress(groundSalt, initCodeHash);
+    return _computeAddress(groundSalt, initCodeHash);
   }
 }

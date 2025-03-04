@@ -1,11 +1,14 @@
 {
   "network": "cyprus1",
   "chainId": 15000,
-  "uniswapAddressGrinder": "0x001832e7ceFd75Abdc1003C07c3A92cF8E28249d",
-  "wethAddress": "0x001dA0190B3c0875E4E7bc945e43b019b3aF355A",
-  "factoryAddress": "0x002C888ECd8fdc79b8405555A9488307e1035cE3",
-  "positionDescriptorAddress": "0x0003Ea351fe743ede69cce7F754244528Ad6B311",
-  "positionManagerAddress": "0x00016F5788e748B0636EC98BF5658a831BEF2896",
-  "routerAddress": "0x0008391976F613D31B3fE9B7a428b61B946688c7",
-  "timestamp": "2025-03-04T02:51:44.989Z"
+  "uniswapAddressGrinder": "0x001fD3aF234FFD281FF500586046Ffa8F7831A1E",
+  "wethAddress": "0x002A3521E5e4BA8F1d7907dFb134e0934A35838B",
+  "factoryAddress": "0x0051cFE7007DBa112448a25A8F99129c1C381189",
+  "positionDescriptorAddress": "0x0072FacAB080DeeEA0346FBCb3171dbcCA2Db4e4",
+  "positionManagerAddress": "0x001bd478bbfE9725F3f454352cD1Df9287f5209B",
+  "routerAddress": "0x000aDf7041aEFd5436F3757541Ff50059C3c9043",
+  "timestamp": "2025-03-04T19:16:05.648Z",
+  "factory": "0x002B4FE51d644CDAF46a2b6198d32aE63D7b7DBa",
+  "token0": "0x0069c1BBbba967a9A0b8045813d5e09974ba324c",
+  "token1": "0x000A6574Fb14AE59c4674A3690281234dBDe10a7"
 }
