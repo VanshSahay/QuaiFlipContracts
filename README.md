@@ -57,7 +57,7 @@ To deploy and test the modified Uniswap V3 contracts on Quai Network, follow the
 
 1. Ensure you are in the correct directory:
 ```shell
-cd QuaiFlip/Contracts/Solidity
+cd QuaiFlipContracts/Solidity
 ```
 2. Compile the contracts:
 ```shell
