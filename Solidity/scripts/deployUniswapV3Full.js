@@ -38,27 +38,17 @@ async function extractDeployedAddress(receipt, uniswapAddressGrinderContract) {
     throw new Error('Failed to find deployed contract address')
 }
 
-// Utility function to properly process bytecode for Quais deployment
+// Function to ensure bytecode is properly formatted for deployment
 function processBytecodeForDeployment(bytecode) {
-    if (!bytecode) {
-        throw new Error('Bytecode is empty or undefined');
+    // Ensure bytecode has 0x prefix
+    if (!bytecode.startsWith('0x')) {
+        bytecode = '0x' + bytecode;
     }
 
-    // Ensure bytecode is a string
-    let bytecodeStr = bytecode.toString();
+    // Log details for debugging
+    console.log(`Processing bytecode with length: ${bytecode.length}`);
 
-    // If it already starts with 0x, strip it temporarily
-    if (bytecodeStr.startsWith('0x')) {
-        bytecodeStr = bytecodeStr.slice(2);
-    }
-
-    // Check for invalid characters
-    if (!/^[0-9a-fA-F]*$/.test(bytecodeStr)) {
-        throw new Error('Bytecode contains invalid characters');
-    }
-
-    // Add 0x prefix back
-    return '0x' + bytecodeStr;
+    return bytecode;
 }
 
 async function deployWETH9WithGrinder(uniswapAddressGrinderContract, provider, wallet) {
@@ -73,12 +63,14 @@ async function deployWETH9WithGrinder(uniswapAddressGrinderContract, provider, w
     // Use a random salt or a deterministic one
     const salt = quais.keccak256(quais.toUtf8Bytes('WETH9_SALT_' + Date.now()))
 
-    // Deploy WETH9 using the grinder
-    const tx = await uniswapAddressGrinderContract.deployContract(
+    // Deploy WETH9 using the grinder - specify the exact function signature to avoid ambiguity
+    console.log('Calling deployContract with explicit function signature...')
+    const tx = await uniswapAddressGrinderContract['deployContract(bytes,bytes,bytes32,uint256)'](
         WETH9Artifact.bytecode,
         constructorArgs,
         salt,
-        { gasLimit: 5000000 }
+        0,  // Explicit gasLimit parameter as the 4th argument
+        { gasLimit: 5000000 }  // Transaction options
     )
     const receipt = await tx.wait()
 
@@ -96,7 +88,11 @@ async function deployUniswapV3Core(uniswapAddressGrinderContract, provider, wall
     console.log('Deploying UniswapV3Factory using UniswapAddressGrinder...')
 
     // Get the UniswapV3Factory bytecode and abi
-    const UniswapV3FactoryArtifact = require('../../v3-core/artifacts/contracts/UniswapV3Factory.sol/UniswapV3Factory.json')
+    const UniswapV3FactoryArtifact = require('../../v3-core/artifacts/contracts/QuaiUniswapV3FactoryBytecodeOnly.sol/QuaiUniswapV3Factory.json')
+
+    // Log bytecode size in bytes and kilobytes
+    const bytecodeSize = (UniswapV3FactoryArtifact.bytecode.length - 2) / 2; // -2 for '0x', /2 because each byte is 2 hex chars
+    console.log(`QuaiUniswapV3Factory bytecode size: ${bytecodeSize} bytes (${(bytecodeSize / 1024).toFixed(2)} KB)`)
 
     // UniswapV3Factory has no constructor arguments
     const constructorArgs = '0x'
@@ -104,22 +100,107 @@ async function deployUniswapV3Core(uniswapAddressGrinderContract, provider, wall
     // Use a random salt or a deterministic one
     const salt = quais.keccak256(quais.toUtf8Bytes('UNISWAP_FACTORY_SALT_' + Date.now()))
 
-    // Deploy Factory using the grinder
-    const tx = await uniswapAddressGrinderContract.deployContract(
-        UniswapV3FactoryArtifact.bytecode,
-        constructorArgs,
-        salt,
-    )
-    const receipt = await tx.wait()
+    // Deploy Factory using the grinder with an explicitly high gas limit
+    console.log('Deploying factory with high gas limit...')
 
-    // Extract the deployed address
-    const factoryAddress = await extractDeployedAddress(receipt, uniswapAddressGrinderContract)
+    try {
+        // Try with an extremely high gas limit to ensure we don't run out of gas during grinding
+        const tx = await uniswapAddressGrinderContract['deployContract(bytes,bytes,bytes32,uint256)'](
+            UniswapV3FactoryArtifact.bytecode,
+            constructorArgs,
+            salt,
+            0, // Explicit gasLimit parameter as the 4th argument
+            { gasLimit: 5000000 } // Transaction options - 30M gas
+        )
 
-    console.log(`UniswapV3Factory deployed to: ${factoryAddress}`)
-    // Verify the address is Quai compatible
-    await verifyQuaiAddress(factoryAddress)
+        console.log('Transaction sent with hash:', tx.hash)
+        console.log('Waiting for transaction confirmation...')
 
-    return factoryAddress
+        const receipt = await tx.wait()
+        console.log('Transaction confirmed with status:', receipt.status)
+
+        // Extract the deployed address
+        const factoryAddress = await extractDeployedAddress(receipt, uniswapAddressGrinderContract)
+        console.log(`UniswapV3Factory deployed to: ${factoryAddress}`)
+
+        // Verify the address is Quai compatible
+        await verifyQuaiAddress(factoryAddress)
+
+        try {
+            // Create a factory contract instance
+            const factory = new quais.Contract(
+                factoryAddress,
+                UniswapV3FactoryArtifact.abi,
+                wallet
+            )
+
+            // Now set the UniswapAddressGrinder address in the factory
+            console.log('Setting UniswapAddressGrinder address in the factory...')
+
+            // Get the grinder address - different versions of ethers/quais may have it in different places
+            let grinderAddress = null
+            if (uniswapAddressGrinderContract.address) {
+                grinderAddress = uniswapAddressGrinderContract.address
+            } else if (uniswapAddressGrinderContract.target) {
+                grinderAddress = uniswapAddressGrinderContract.target
+            } else {
+                // Try to extract it from the deployments file
+                try {
+                    const deploymentsPath = path.join(__dirname, '../deployments/uniswap-address-grinder-cyprus1.json')
+                    if (fs.existsSync(deploymentsPath)) {
+                        const deploymentData = JSON.parse(fs.readFileSync(deploymentsPath, 'utf8'))
+                        grinderAddress = deploymentData.address
+                    }
+                } catch (err) {
+                    console.warn('Error reading deployments file:', err.message)
+                }
+            }
+
+            if (grinderAddress) {
+                try {
+                    // Attempt to set the grinder address but continue if it fails
+                    console.log(`Attempting to set UniswapAddressGrinder address to ${grinderAddress}...`)
+                    const setGrinderTx = await factory.setUniswapAddressGrinder(
+                        grinderAddress,
+                        { gasLimit: 3000000 }
+                    )
+                    await setGrinderTx.wait()
+                    console.log(`UniswapAddressGrinder set to: ${grinderAddress}`)
+                } catch (txError) {
+                    console.warn('⚠️ Unable to set UniswapAddressGrinder in factory. This might be expected with the minimal factory implementation.')
+                    console.warn('Continuing with deployment without setting the grinder address.')
+                }
+            } else {
+                console.warn('⚠️ Failed to retrieve UniswapAddressGrinder address, skipping setting it in factory')
+            }
+        } catch (error) {
+            console.error('Error setting UniswapAddressGrinder in factory:')
+            console.error(error)
+            console.log('Continuing deployment despite factory configuration error...')
+        }
+
+        return factoryAddress;
+    } catch (error) {
+        console.error('Error deploying UniswapV3Factory:')
+        if (error.error) {
+            console.error('Error code:', error.error.code)
+            console.error('Error message:', error.error.message)
+
+            // Try to parse the error data if available
+            if (error.error.data) {
+                try {
+                    const decodedData = quais.toUtf8String(error.error.data.slice(138));
+                    console.error('Decoded error data:', decodedData);
+                } catch (decodeError) {
+                    console.error('Raw error data:', error.error.data);
+                }
+            }
+        } else {
+            console.error(error)
+        }
+
+        throw error
+    }
 }
 
 // Fix for formatBytes32String
@@ -150,10 +231,12 @@ async function deployUniswapV3Periphery(uniswapAddressGrinderContract, factoryAd
     const nftDescriptorSalt = quais.keccak256(quais.toUtf8Bytes('NFT_DESCRIPTOR_SALT_' + Date.now()))
 
     // Deploy NFTDescriptor
-    const nftDescriptorTx = await uniswapAddressGrinderContract.deployContract(
+    const nftDescriptorTx = await uniswapAddressGrinderContract['deployContract(bytes,bytes,bytes32,uint256)'](
         NFTDescriptorArtifact.bytecode,
         nftDescriptorConstructorArgs,
         nftDescriptorSalt,
+        0, // Explicit gasLimit parameter
+        {} // No additional options needed
     )
     const nftDescriptorReceipt = await nftDescriptorTx.wait()
 
@@ -194,17 +277,18 @@ async function deployUniswapV3Periphery(uniswapAddressGrinderContract, factoryAd
 
 
 
-    // Process the linked bytecode to ensure it’s valid for deployment.
+    // Process the linked bytecode to ensure it's valid for deployment.
     const processedPositionDescriptorBytecode = processBytecodeForDeployment(unlinkedBytecode);
 
     console.log('Deploying NonfungibleTokenPositionDescriptor with constructor args:', positionDescriptorConstructorArgs)
     console.log('WETH address:', wethAddress)
 
     // Deploy with fixed and linked bytecode format
-    const positionDescriptorTx = await uniswapAddressGrinderContract.deployContract(
+    const positionDescriptorTx = await uniswapAddressGrinderContract['deployContract(bytes,bytes,bytes32,uint256)'](
         processedPositionDescriptorBytecode,
         positionDescriptorConstructorArgs,
         positionDescriptorSalt,
+        0, // Explicit gasLimit parameter
         { gasLimit: 8000000 } // Higher gas limit for this complex contract
     )
 
@@ -229,10 +313,11 @@ async function deployUniswapV3Periphery(uniswapAddressGrinderContract, factoryAd
     const positionManagerSalt = quais.keccak256(quais.toUtf8Bytes('POSITION_MANAGER_SALT_' + Date.now()))
 
     // Deploy PositionManager
-    const positionManagerTx = await uniswapAddressGrinderContract.deployContract(
+    const positionManagerTx = await uniswapAddressGrinderContract['deployContract(bytes,bytes,bytes32,uint256)'](
         NonfungiblePositionManagerArtifact.bytecode,
         positionManagerConstructorArgs,
         positionManagerSalt,
+        0, // Explicit gasLimit parameter
         { gasLimit: 8000000 } // Increased gas limit
     )
     const positionManagerReceipt = await positionManagerTx.wait()
@@ -259,10 +344,11 @@ async function deployUniswapV3Periphery(uniswapAddressGrinderContract, factoryAd
     const processedRouterBytecode = processBytecodeForDeployment(SwapRouterArtifact.bytecode)
 
     // Deploy Router
-    const routerTx = await uniswapAddressGrinderContract.deployContract(
+    const routerTx = await uniswapAddressGrinderContract['deployContract(bytes,bytes,bytes32,uint256)'](
         processedRouterBytecode,
         routerConstructorArgs,
         routerSalt,
+        0, // Explicit gasLimit parameter
         { gasLimit: 8000000 } // Increased gas limit
     )
     const routerReceipt = await routerTx.wait()

@@ -117,11 +117,13 @@ async function deployTestToken(name = "Example Token", symbol = "EXTKN", initial
         const salt = quais.keccak256(quais.toUtf8Bytes(`${name}_${symbol}_SALT_${Date.now()}`));
 
         console.log(`Deploying ${name} token using UniswapAddressGrinder...`);
-        const tx = await uniswapAddressGrinder.deployContract(
+        // Use explicit function signature to select the correct overload
+        const tx = await uniswapAddressGrinder["deployContract(bytes,bytes,bytes32,uint256)"](
             TestTokenArtifact.bytecode,
             constructorArgs,
             salt,
-            { gasLimit: 5000000 } // Increased gas limit for grinding
+            0, // explicit 0 for gasLimit parameter (will use default)
+            { gasLimit: 5000000 } // Increased gas limit for the transaction
         );
 
         console.log(`Transaction hash: ${tx.hash}`);

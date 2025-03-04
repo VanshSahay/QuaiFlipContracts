@@ -51,7 +51,7 @@ async function testUniswapAddressGrinder() {
 
         // Deploy using UniswapAddressGrinder
         console.log('Deploying test token...');
-        const tx = await uniswapAddressGrinder.deployContract(
+        const tx = await uniswapAddressGrinder["deployContract(bytes,bytes,bytes32,uint256)"](
             TestTokenArtifact.bytecode,
             constructorArgs,
             salt,
