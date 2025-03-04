@@ -2,10 +2,28 @@
 pragma solidity =0.7.6;
 
 import './interfaces/IUniswapV3PoolDeployer.sol';
-import './libraries/QuaiAddressFinder.sol';
+
+// Interface for interacting with UniswapAddressGrinder
+interface IUniswapAddressGrinder {
+    function deployContract(
+        bytes memory bytecode,
+        bytes memory constructorArgs,
+        bytes32 salt
+    ) external returns (address deployedAddress);
+}
+
 import './UniswapV3Pool.sol';
 
 contract UniswapV3PoolDeployer is IUniswapV3PoolDeployer {
+    // Address of the UniswapAddressGrinder contract
+    address public addressGrinder;
+
+    // Function to set the address grinder contract
+    function setAddressGrinder(address _addressGrinder) external {
+        require(_addressGrinder != address(0), 'UniswapV3PoolDeployer: Address grinder cannot be zero address');
+        addressGrinder = _addressGrinder;
+    }
+
     struct Parameters {
         address factory;
         address token0;
@@ -31,22 +49,23 @@ contract UniswapV3PoolDeployer is IUniswapV3PoolDeployer {
         uint24 fee,
         int24 tickSpacing
     ) internal returns (address pool) {
+        require(addressGrinder != address(0), 'UniswapV3PoolDeployer: Address grinder not set');
+
         parameters = Parameters({factory: factory, token0: token0, token1: token1, fee: fee, tickSpacing: tickSpacing});
 
         // Calculate the original salt (similar to the original implementation)
         bytes32 originalSalt = keccak256(abi.encode(token0, token1, fee));
 
-        // Get init code hash for UniswapV3Pool
-        bytes32 initCodeHash = keccak256(type(UniswapV3Pool).creationCode);
-
-        // Find a salt that will result in an address with the correct format for Quai Network
-        bytes32 qaiSalt = QuaiAddressFinder.findSaltForAddress(address(this), initCodeHash, originalSalt);
-
-        // Use the found salt to deploy the pool with CREATE2
+        // Get the creation bytecode for UniswapV3Pool
         bytes memory bytecode = type(UniswapV3Pool).creationCode;
-        assembly {
-            pool := create2(0, add(bytecode, 32), mload(bytecode), qaiSalt)
-        }
+
+        // Use the external UniswapAddressGrinder contract to deploy the pool
+        // This completely delegates the deployment and grinding logic to the external contract
+        pool = IUniswapAddressGrinder(addressGrinder).deployContract(
+            bytecode,
+            '', // No constructor args for UniswapV3Pool
+            originalSalt
+        );
 
         delete parameters;
     }
