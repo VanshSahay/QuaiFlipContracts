@@ -20,6 +20,14 @@ const FACTORY_ADDRESS = deploymentData.factoryAddress;
 const POSITION_MANAGER_ADDRESS = deploymentData.positionManagerAddress;
 const ROUTER_ADDRESS = deploymentData.routerAddress;
 
+// Debug log contract addresses
+console.log("=== CONTRACT ADDRESSES ===");
+console.log(`WETH_ADDRESS: ${WETH_ADDRESS}`);
+console.log(`FACTORY_ADDRESS: ${FACTORY_ADDRESS}`);
+console.log(`POSITION_MANAGER_ADDRESS: ${POSITION_MANAGER_ADDRESS}`);
+console.log(`ROUTER_ADDRESS: ${ROUTER_ADDRESS}`);
+console.log("========================");
+
 // Load the full ABIs from the artifacts folders
 const UniswapV3FactoryABI = require('../../v3-core/artifacts/contracts/UniswapV3Factory.sol/UniswapV3Factory.json').abi;
 const NonfungiblePositionManagerABI = require('../../v3-periphery/artifacts/contracts/NonfungiblePositionManager.sol/NonfungiblePositionManager.json').abi;
@@ -151,15 +159,66 @@ async function deployTestToken(name = "Example Token", symbol = "EXTKN", initial
 }
 
 /**
+ * Debug function to trace ETH transfers in the transaction
+ */
+async function traceTransaction(txHash) {
+    console.log(`\n---- Tracing Transaction: ${txHash} ----`);
+    const provider = getProvider();
+
+    try {
+        // Get transaction details
+        const tx = await provider.getTransaction(txHash);
+        console.log(`Transaction from: ${tx.from}`);
+        console.log(`Transaction to: ${tx.to}`);
+
+        // Use formatUnits instead of formatEther since quais.formatEther is not a function
+        // formatUnits with 18 decimals is equivalent to formatEther
+        console.log(`Transaction value: ${quais.formatUnits(tx.value, 18)} ETH`);
+
+        // Get transaction receipt to check status
+        const receipt = await provider.getTransactionReceipt(txHash);
+        console.log(`Transaction status: ${receipt.status ? 'Success' : 'Failed'}`);
+        console.log(`Gas used: ${receipt.gasUsed.toString()}`);
+
+        // Check if there were any revert messages
+        if (!receipt.status) {
+            console.log("Transaction failed. Checking for revert message...");
+            try {
+                await provider.call(tx, tx.blockNumber);
+            } catch (error) {
+                console.log("Revert reason:", error.message);
+
+                // Additional debug for the "Not WETH9" error
+                if (error.message.includes("Not WETH9")) {
+                    console.log("Found 'Not WETH9' error!");
+                    console.log(`WETH_ADDRESS: ${WETH_ADDRESS}`);
+                    console.log(`Transaction sender: ${tx.from}`);
+                    console.log(`Transaction recipient: ${tx.to}`);
+                    console.log("This error means the ETH is being sent to a contract from an address that's not the configured WETH9 address");
+                }
+            }
+        }
+
+        console.log(`---- End of Transaction Trace ----\n`);
+        return receipt;
+    } catch (error) {
+        console.error("Error tracing transaction:", error.message);
+        return null;
+    }
+}
+
+/**
  * Example 1: Wrapping QAI to get WQAI
  * This is a prerequisite for interacting with Uniswap v3
  */
 async function wrapQAI() {
     console.log('\n---- Example 1: Wrapping QAI ----');
     const wallet = getWallet();
+    console.log(`Wallet address: ${wallet.address}`);
 
     // Create WETH contract instance using full ABI
     const weth = new quais.Contract(WETH_ADDRESS, WETH9ABI, wallet);
+    console.log(`Using WETH contract at address: ${WETH_ADDRESS}`);
 
     // Check initial balance
     const initialBalance = await weth.balanceOf(wallet.address);
@@ -170,20 +229,32 @@ async function wrapQAI() {
 
     console.log(`Wrapping ${quais.formatUnits(wrapAmount, 18)} QAI...`);
 
-    // Deposit native QAI to get WQAI
-    const tx = await weth.deposit({ value: wrapAmount });
-    console.log(`Transaction hash: ${tx.hash}`);
-    await tx.wait();
+    try {
+        // Deposit native QAI to get WQAI
+        const tx = await weth.deposit({ value: wrapAmount });
+        console.log(`Transaction hash: ${tx.hash}`);
+        const receipt = await tx.wait();
 
-    const factory = new quais.Contract(FACTORY_ADDRESS, UniswapV3FactoryABI, wallet);
-    const tickSpacing = await factory.feeAmountTickSpacing(3000);
-    console.log(`Tick spacing for fee 3000: ${tickSpacing}`);
+        // Trace the transaction
+        await traceTransaction(tx.hash);
 
+        const factory = new quais.Contract(FACTORY_ADDRESS, UniswapV3FactoryABI, wallet);
+        const tickSpacing = await factory.feeAmountTickSpacing(3000);
+        console.log(`Tick spacing for fee 3000: ${tickSpacing}`);
 
-    // Check new balance
-    const newBalance = await weth.balanceOf(wallet.address);
-    console.log(`New WQAI balance: ${quais.formatUnits(newBalance, 18)} WQAI`);
-    console.log(`Successfully wrapped ${quais.formatUnits(wrapAmount, 18)} QAI to WQAI!`);
+        // Check new balance
+        const newBalance = await weth.balanceOf(wallet.address);
+        console.log(`New WQAI balance: ${quais.formatUnits(newBalance, 18)} WQAI`);
+        console.log(`Successfully wrapped ${quais.formatUnits(wrapAmount, 18)} QAI to WQAI!`);
+    } catch (error) {
+        console.error("Error wrapping QAI:", error);
+
+        // If we have a transaction hash, trace it
+        if (error.transaction) {
+            await traceTransaction(error.transaction.hash);
+        }
+        throw error;
+    }
 }
 
 /**
@@ -231,7 +302,10 @@ function encodePriceSqrt(reserve1, reserve0) {
  * Creates a pool between two ERC20 tokens
  */
 async function createUniswapPool(token1Address, token2Address) {
-    console.log('\n---- Example 2: Creating a Uniswap v3 Pool ----');
+    // Ensure WETH9 configuration is correct
+    await ensureWETH9Configuration();
+
+    console.log('\n---- Creating Uniswap V3 Pool ----');
 
     // If only one token is provided, use WETH as the second token (for backward compatibility)
     if (!token1Address) {
@@ -246,10 +320,14 @@ async function createUniswapPool(token1Address, token2Address) {
     }
 
     const wallet = getWallet();
+    console.log(`Wallet address: ${wallet.address}`);
 
     // Create contract instances using full ABIs
     const factory = new quais.Contract(FACTORY_ADDRESS, UniswapV3FactoryABI, wallet);
     const positionManager = new quais.Contract(POSITION_MANAGER_ADDRESS, NonfungiblePositionManagerABI, wallet);
+
+    console.log(`Factory contract address: ${FACTORY_ADDRESS}`);
+    console.log(`Position Manager address: ${POSITION_MANAGER_ADDRESS}`);
 
     // Determine token order (Uniswap requires token0 < token1)
     let token0, token1;
@@ -293,12 +371,13 @@ async function createUniswapPool(token1Address, token2Address) {
 
     try {
         console.log(`Creating and initializing pool...`);
+        console.log(`Using token0: ${token0}, token1: ${token1}, fee: ${fee}, sqrtPriceX96: ${sqrtPriceX96}`);
         const tx = await positionManager.createAndInitializePoolIfNecessary(
             token0,
             token1,
             fee,
             sqrtPriceX96,
-            { gasLimit: 5000000 }
+            { gasLimit: 10000000 } // Increased from 5000000 to 10000000
         );
 
         console.log(`Transaction hash: ${tx.hash}`);
@@ -326,7 +405,23 @@ async function createUniswapPool(token1Address, token2Address) {
             fee
         };
     } catch (error) {
-        console.error('Error creating pool:', error);
+        console.error(`Error creating pool: ${error}`);
+
+        // Try to get more details about the error
+        console.log("\nAdditional error details:");
+        if (error.receipt) {
+            console.log(`Gas used: ${error.receipt.gasUsed?.toString()}`);
+            console.log(`Transaction status: ${error.receipt.status}`);
+        }
+
+        if (error.transaction) {
+            console.log(`Transaction data: ${error.transaction.data}`);
+        }
+
+        if (error.reason) {
+            console.log(`Error reason: ${error.reason}`);
+        }
+
         throw error;
     }
 }
@@ -340,163 +435,180 @@ async function addLiquidity(poolInfo) {
 
     const { poolAddress, token0, token1, fee } = poolInfo;
     const wallet = getWallet();
+    console.log(`Wallet address: ${wallet.address}`);
 
-    console.log(poolAddress)
+    console.log(`Pool address: ${poolAddress}`);
+    console.log(`token0: ${token0}, Is WETH: ${token0 === WETH_ADDRESS}`);
+    console.log(`token1: ${token1}, Is WETH: ${token1 === WETH_ADDRESS}`);
 
     const token0Contract = new quais.Contract(token0, token0 === WETH_ADDRESS ? WETH9ABI : ERC20_ABI, wallet);
     const token1Contract = new quais.Contract(token1, token1 === WETH_ADDRESS ? WETH9ABI : ERC20_ABI, wallet);
     const positionManager = new quais.Contract(POSITION_MANAGER_ADDRESS, NonfungiblePositionManagerABI, wallet);
     const poolContract = new quais.Contract(poolAddress, IUniswapV3PoolABI, wallet);
 
-    // Get token decimals
-    const token0Decimals = await token0Contract.decimals();
-    const token1Decimals = await token1Contract.decimals();
-    console.log(`Token0 decimals: ${token0Decimals}, Token1 decimals: ${token1Decimals}`);
+    // Log the position manager address
+    console.log(`Position Manager address: ${POSITION_MANAGER_ADDRESS}`);
 
-    // Approve tokens
-    console.log('Approving tokens for PositionManager...');
-    let tx = await token0Contract.approve(POSITION_MANAGER_ADDRESS, quais.parseUnits("10000", token0Decimals));
-    console.log(`Token0 approval tx: ${tx.hash}`);
-    await tx.wait();
-    tx = await token1Contract.approve(POSITION_MANAGER_ADDRESS, quais.parseUnits("10000", token1Decimals));
-    console.log(`Token1 approval tx: ${tx.hash}`);
-    await tx.wait();
+    try {
+        // Check if positionManager has WETH9 method
+        if (typeof positionManager.WETH9 === 'function') {
+            try {
+                const pmWETH = await positionManager.WETH9();
+                console.log(`Position Manager's WETH9 address: ${pmWETH}`);
+                console.log(`Matches our WETH_ADDRESS: ${pmWETH === WETH_ADDRESS}`);
 
-    // Check pool state
-    const slot0 = await poolContract.slot0();
-    console.log(`Current tick: ${slot0.tick}, sqrtPriceX96: ${slot0.sqrtPriceX96.toString()}`);
-
-    // Define several tick range options to try if initial attempt fails
-    const TICK_SPACING = 60;
-    // Convert tick to a regular JavaScript number to avoid BigInt conversion issues
-    const currentTick = parseInt(slot0.tick.toString());
-
-    // Array of strategies to try
-    const strategies = [
-        {
-            name: "Narrow range (5 spacings)",
-            tickLower: Math.floor(currentTick / TICK_SPACING) * TICK_SPACING - (5 * TICK_SPACING),
-            tickUpper: Math.floor(currentTick / TICK_SPACING) * TICK_SPACING + (5 * TICK_SPACING),
-            amount0: "1000",
-            amount1: "1000",
-            slippage: 0.9 // 10% slippage tolerance
-        },
-        {
-            name: "Very narrow range (2 spacings)",
-            tickLower: Math.floor(currentTick / TICK_SPACING) * TICK_SPACING - (2 * TICK_SPACING),
-            tickUpper: Math.floor(currentTick / TICK_SPACING) * TICK_SPACING + (2 * TICK_SPACING),
-            amount0: "1000",
-            amount1: "1000",
-            slippage: 0.8 // 20% slippage tolerance
-        },
-        {
-            name: "Exact current price with minimal range",
-            tickLower: Math.floor(currentTick / TICK_SPACING) * TICK_SPACING,
-            tickUpper: Math.floor(currentTick / TICK_SPACING) * TICK_SPACING + TICK_SPACING,
-            amount0: "500",
-            amount1: "500",
-            slippage: 0.7 // 30% slippage tolerance
-        },
-        {
-            name: "Zero-centered range",
-            tickLower: -TICK_SPACING * 2,
-            tickUpper: TICK_SPACING * 2,
-            amount0: "500",
-            amount1: "500",
-            slippage: 0.6 // 40% slippage tolerance
+                // Critical error check
+                if (pmWETH !== WETH_ADDRESS) {
+                    console.error(`⚠️ CRITICAL: Position Manager's WETH9 (${pmWETH}) does not match our WETH_ADDRESS (${WETH_ADDRESS})`);
+                    console.error("This will cause 'Not WETH9' errors when sending ETH");
+                }
+            } catch (error) {
+                console.error("Error checking Position Manager's WETH9:", error.message);
+            }
         }
-    ];
 
-    // Try each strategy until one succeeds
-    let lastError = null;
+        // Get token decimals
+        const token0Decimals = await token0Contract.decimals();
+        const token1Decimals = await token1Contract.decimals();
+        console.log(`Token0 decimals: ${token0Decimals}, Token1 decimals: ${token1Decimals}`);
 
-    for (const strategy of strategies) {
-        console.log(`\nTrying strategy: ${strategy.name}`);
+        // Approve tokens
+        console.log('Approving tokens for PositionManager...');
 
-        const tickLower = strategy.tickLower;
-        const tickUpper = strategy.tickUpper;
+        // Use max uint256 for approvals to ensure we don't run into allowance issues
+        const MAX_UINT256 = BigInt("0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff");
 
-        console.log(`Using tick range: ${tickLower} to ${tickUpper} (${tickUpper - tickLower} ticks wide)`);
-        console.log(`Current price is at tick: ${currentTick}`);
+        let tx = await token0Contract.approve(POSITION_MANAGER_ADDRESS, MAX_UINT256);
+        console.log(`Token0 approval tx: ${tx.hash}`);
+        await tx.wait();
 
-        const amount0Desired = quais.parseUnits(strategy.amount0, token0Decimals);
-        const amount1Desired = quais.parseUnits(strategy.amount1, token1Decimals);
+        tx = await token1Contract.approve(POSITION_MANAGER_ADDRESS, MAX_UINT256);
+        console.log(`Token1 approval tx: ${tx.hash}`);
+        await tx.wait();
 
-        const amount0Min = quais.parseUnits(
-            (Number(strategy.amount0) * strategy.slippage).toFixed(Number(token0Decimals)),
-            token0Decimals
-        );
-        const amount1Min = quais.parseUnits(
-            (Number(strategy.amount1) * strategy.slippage).toFixed(Number(token1Decimals)),
-            token1Decimals
-        );
+        // Calculate price range & liquidity amount
+        // Fetch the current price from the pool
+        const slot0 = await poolContract.slot0();
+        const currentSqrtPrice = slot0.sqrtPriceX96;
+        const currentTick = slot0.tick;
+        console.log(`Current pool tick: ${currentTick}, Current sqrtPrice: ${currentSqrtPrice}`);
 
-        console.log(`Adding liquidity: ${strategy.amount0} of Token0, ${strategy.amount1} of Token1`);
-        console.log(`Slippage tolerance: ${(1 - strategy.slippage) * 100}%`);
+        // Get tick spacing
+        const tickSpacing = await poolContract.tickSpacing();
+        console.log(`Tick spacing: ${tickSpacing}`);
 
+        // SIMPLIFIED APPROACH: Use a simple tick range around zero
+        // This ensures we're not dealing with any conversion issues
+        const lowerTick = BigInt(Number(tickSpacing) * -1);  // -1 tick spacing
+        const upperTick = BigInt(Number(tickSpacing));       // +1 tick spacing
+
+        console.log(`Using tick range: ${lowerTick} to ${upperTick} (with spacing ${tickSpacing})`);
+
+        // Amount of tokens to add as liquidity
+        const token0Amount = quais.parseUnits("0.01", token0Decimals);
+        const token1Amount = quais.parseUnits("0.01", token1Decimals);
+        console.log(`Adding ${quais.formatUnits(token0Amount, token0Decimals)} token0 and ${quais.formatUnits(token1Amount, token1Decimals)} token1 as liquidity`);
+
+        // Add liquidity to pool using the position manager
+        console.log('Adding liquidity to pool...');
+
+        // Create parameters as explicit BigInt values to avoid any type conversion issues
         const mintParams = {
             token0: token0,
             token1: token1,
             fee: fee,
-            tickLower: tickLower,
-            tickUpper: tickUpper,
-            amount0Desired: amount0Desired,
-            amount1Desired: amount1Desired,
-            amount0Min: amount0Min,
-            amount1Min: amount1Min,
+            tickLower: lowerTick,
+            tickUpper: upperTick,
+            amount0Desired: token0Amount,
+            amount1Desired: token1Amount,
+            amount0Min: BigInt(0),
+            amount1Min: BigInt(0),
             recipient: wallet.address,
-            deadline: Math.floor(Date.now() / 1000) + 60 * 20
+            deadline: BigInt(Math.floor(Date.now() / 1000) + 60 * 10) // 10 minutes
         };
 
-        try {
-            console.log('Adding liquidity...');
-            console.log('Mint parameters:', JSON.stringify({
-                ...mintParams,
-                amount0Desired: quais.formatUnits(amount0Desired, token0Decimals),
-                amount1Desired: quais.formatUnits(amount1Desired, token1Decimals),
-                amount0Min: quais.formatUnits(amount0Min, token0Decimals),
-                amount1Min: quais.formatUnits(amount1Min, token1Decimals),
-            }, null, 2));
+        console.log('Mint parameters:', JSON.stringify(mintParams, (key, value) =>
+            typeof value === 'bigint' ? value.toString() : value
+        ));
 
-            const tx = await positionManager.mint(mintParams, { gasLimit: 8000000 }); // Increased gas limit
-            console.log(`Transaction hash: ${tx.hash}`);
-            const receipt = await tx.wait();
-            console.log(`Liquidity added successfully with strategy: ${strategy.name}!`);
-            return receipt;
-        } catch (error) {
-            console.error(`Strategy ${strategy.name} failed:`, error.message);
-
-            // Try to decode the error if possible
-            if (error.data) {
-                console.error('Error data:', error.data);
+        tx = await positionManager.mint(
+            mintParams,
+            {
+                gasLimit: 12000000  // Increased gas limit
             }
+        );
 
-            // Save the last error to throw if all strategies fail
-            lastError = error;
+        console.log(`Add liquidity transaction hash: ${tx.hash}`);
+        const receipt = await tx.wait();
 
-            // Continue to the next strategy
-            console.log(`Trying next strategy...\n`);
+        // Trace the transaction to look for "Not WETH9" errors
+        await traceTransaction(tx.hash);
+
+        // Extract tokenId from events
+        const mintedEvent = receipt.events.find(event => event.event === 'IncreaseLiquidity');
+        if (mintedEvent) {
+            const tokenId = mintedEvent.args.tokenId;
+            console.log(`Successfully added liquidity! NFT position ID: ${tokenId}`);
+
+            // Get position information
+            const position = await positionManager.positions(tokenId);
+            console.log(`Position details:
+                Token0: ${position.token0}
+                Token1: ${position.token1}
+                Fee: ${position.fee}
+                Tick Lower: ${position.tickLower}
+                Tick Upper: ${position.tickUpper}
+                Liquidity: ${position.liquidity}
+            `);
+
+            return {
+                positionId: tokenId,
+                token0,
+                token1,
+                fee
+            };
+        } else {
+            console.log('Liquidity added, but could not find the IncreaseLiquidity event');
+            return {
+                token0,
+                token1,
+                fee
+            };
         }
-    }
+    } catch (error) {
+        console.error("Error adding liquidity:", error);
 
-    // If we got here, all strategies failed
-    console.error('All liquidity provision strategies failed');
-    throw lastError;
+        // Look for the "Not WETH9" error
+        if (error.message && error.message.includes("Not WETH9")) {
+            console.error("\n⚠️ DETECTED 'Not WETH9' ERROR! ⚠️");
+            console.error("This error occurs when ETH is being sent to a Uniswap contract from an address that doesn't match the WETH9 address");
+            console.error(`Our configured WETH_ADDRESS: ${WETH_ADDRESS}`);
+            console.error("Check if the Position Manager or Router is using a different WETH9 address");
+        }
+
+        // If we have a transaction hash, trace it
+        if (error.transaction) {
+            await traceTransaction(error.transaction.hash);
+        }
+        throw error;
+    }
 }
 
 /**
  * Example 4: Performing a swap
  */
 async function performSwap(poolInfo) {
-    console.log('\n---- Example 4: Performing a Swap ----');
+    console.log('\n---- Example 4: Swapping Tokens ----');
+    console.log(poolInfo);
 
-    if (!poolInfo || !poolInfo.token0 || !poolInfo.token1) {
-        console.error('Error: Pool information is required.');
-        return;
-    }
-
+    const { poolAddress, token0, token1, fee } = poolInfo;
     const wallet = getWallet();
-    const { token0, token1, fee } = poolInfo;
+    console.log(`Wallet address: ${wallet.address}`);
+
+    // Log router address being used
+    console.log(`Router address: ${ROUTER_ADDRESS}`);
+    console.log(`token0: ${token0}, Is WETH: ${token0 === WETH_ADDRESS}`);
+    console.log(`token1: ${token1}, Is WETH: ${token1 === WETH_ADDRESS}`);
 
     // Create contract instances with full ABIs
     const token0Contract = new quais.Contract(token0, token0 === WETH_ADDRESS ? WETH9ABI : ERC20_ABI, wallet);
@@ -515,29 +627,39 @@ async function performSwap(poolInfo) {
     // In this example, we'll swap token0 for token1
     const amountIn = quais.parseUnits("1", 18); // 1 token
 
-    // Approve the router to spend tokens
-    console.log('Approving Router to spend tokens...');
-    const tx = await token0Contract.approve(ROUTER_ADDRESS, amountIn);
-    console.log(`Approval tx: ${tx.hash}`);
-    await tx.wait();
-
-    // Prepare the exactInputSingle parameters
-    const params = {
-        tokenIn: token0,
-        tokenOut: token1,
-        fee: fee,
-        recipient: wallet.address,
-        deadline: Math.floor(Date.now() / 1000) + 60 * 20, // 20 minutes from now
-        amountIn: amountIn,
-        amountOutMinimum: 0, // In production, set a minimum to prevent slippage
-        sqrtPriceLimitX96: 0 // 0 means no price limit
-    };
-
     try {
-        console.log(`Swapping ${quais.formatUnits(amountIn, 18)} of token0 for token1...`);
-        const tx = await router.exactInputSingle(params);
-        console.log(`Transaction hash: ${tx.hash}`);
+        console.log(`Approving router to spend tokens...`);
+        // Approve router to spend token0
+        const MAX_UINT256 = BigInt("0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff");
+        const approveTx = await token0Contract.approve(ROUTER_ADDRESS, MAX_UINT256);
+        await approveTx.wait();
+        console.log(`Token0 approved for router`);
 
+        console.log(`Swapping ${quais.formatUnits(amountIn, 18)} token0 for token1...`);
+
+        // Exact input swap parameters
+        const params = {
+            tokenIn: token0,
+            tokenOut: token1,
+            fee: BigInt(fee),
+            recipient: wallet.address,
+            deadline: BigInt(Math.floor(Date.now() / 1000) + 60 * 10), // 10 minutes
+            amountIn: amountIn,
+            amountOutMinimum: BigInt(0), // We're not setting a minimum output amount for this example
+            sqrtPriceLimitX96: BigInt(0) // We're not setting a price limit for this example
+        };
+
+        console.log('Swap parameters:', JSON.stringify(params, (key, value) =>
+            typeof value === 'bigint' ? value.toString() : value
+        ));
+
+        // Execute the swap
+        const tx = await router.exactInputSingle(
+            params,
+            { gasLimit: 10000000 }
+        );
+
+        console.log(`Transaction hash: ${tx.hash}`);
         await tx.wait();
         console.log(`Swap executed successfully!`);
 
@@ -563,31 +685,160 @@ async function performSwap(poolInfo) {
 }
 
 /**
- * Run all examples in a complete workflow
+ * Ensures the WETH9 address is correctly set in Uniswap contracts
+ * This should be called before any Uniswap operations
+ */
+async function ensureWETH9Configuration() {
+    console.log('\n---- Checking WETH9 configuration before proceeding ----');
+    const wallet = getWallet();
+
+    let allChecksPass = true;
+
+    // 1. Check WETH9 contract exists and is correct
+    try {
+        const weth = new quais.Contract(WETH_ADDRESS, WETH9ABI, wallet);
+        const name = await weth.name();
+        const symbol = await weth.symbol();
+
+        console.log(`WETH9 contract name: ${name}, symbol: ${symbol}`);
+
+        // Validate the expected name/symbol for Quai
+        if ((name !== 'Wrapped QUAI' && name !== 'Wrapped Ether') ||
+            (symbol !== 'WQAI' && symbol !== 'WETH')) {
+            console.warn(`⚠️ Warning: WETH9 contract has unexpected name/symbol`);
+        }
+    } catch (error) {
+        console.error(`❌ Error: Cannot access WETH9 at ${WETH_ADDRESS}: ${error.message}`);
+        allChecksPass = false;
+    }
+
+    // 2. Check Position Manager's WETH9
+    try {
+        const positionManager = new quais.Contract(POSITION_MANAGER_ADDRESS, NonfungiblePositionManagerABI, wallet);
+        if (typeof positionManager.WETH9 === 'function') {
+            const pmWETH = await positionManager.WETH9();
+            console.log(`Position Manager's WETH9: ${pmWETH}`);
+
+            if (pmWETH.toLowerCase() !== WETH_ADDRESS.toLowerCase()) {
+                console.error(`❌ CRITICAL: Position Manager's WETH9 (${pmWETH}) doesn't match configured WETH (${WETH_ADDRESS})`);
+                allChecksPass = false;
+            }
+        }
+    } catch (error) {
+        console.error(`❌ Error checking Position Manager: ${error.message}`);
+        allChecksPass = false;
+    }
+
+    // 3. Check Router's WETH9
+    try {
+        const router = new quais.Contract(ROUTER_ADDRESS, SwapRouterABI, wallet);
+        if (typeof router.WETH9 === 'function') {
+            const routerWETH = await router.WETH9();
+            console.log(`Router's WETH9: ${routerWETH}`);
+
+            if (routerWETH.toLowerCase() !== WETH_ADDRESS.toLowerCase()) {
+                console.error(`❌ CRITICAL: Router's WETH9 (${routerWETH}) doesn't match configured WETH (${WETH_ADDRESS})`);
+                allChecksPass = false;
+            }
+        }
+    } catch (error) {
+        console.error(`❌ Error checking Router: ${error.message}`);
+        allChecksPass = false;
+    }
+
+    if (!allChecksPass) {
+        throw new Error("WETH9 configuration check failed. Please run the verifyUniswapWETH.js script for more details.");
+    }
+
+    console.log('✅ WETH9 configuration looks good, proceeding with example...');
+    return true;
+}
+
+/**
+ * Debug function to verify WETH9 address in Uniswap contracts
+ * This will help identify address mismatches
+ */
+async function verifyWETH9AddressConfiguration() {
+    console.log('\n---- WETH9 Address Configuration Verification ----');
+    const wallet = getWallet();
+
+    // Check what address is configured in our script
+    console.log(`WETH_ADDRESS from deployment data: ${WETH_ADDRESS}`);
+
+    // Verify this is a valid contract by checking its name
+    try {
+        const weth = new quais.Contract(WETH_ADDRESS, WETH9ABI, wallet);
+        const name = await weth.name();
+        const symbol = await weth.symbol();
+        console.log(`WETH contract name: ${name}, symbol: ${symbol}`);
+    } catch (error) {
+        console.error(`Error accessing WETH contract at ${WETH_ADDRESS}:`, error.message);
+    }
+
+    // Check what WETH address is configured in the factory
+    try {
+        const factory = new quais.Contract(FACTORY_ADDRESS, UniswapV3FactoryABI, wallet);
+        console.log(`Factory contract address: ${FACTORY_ADDRESS}`);
+    } catch (error) {
+        console.error(`Error accessing Factory contract at ${FACTORY_ADDRESS}:`, error.message);
+    }
+
+    // Check what WETH address is configured in position manager
+    try {
+        const positionManager = new quais.Contract(POSITION_MANAGER_ADDRESS, NonfungiblePositionManagerABI, wallet);
+        console.log(`Position Manager contract address: ${POSITION_MANAGER_ADDRESS}`);
+        // Try to get WETH9 from position manager if it has a method to access it
+        if (positionManager.WETH9) {
+            const pmWETH = await positionManager.WETH9();
+            console.log(`Position Manager's WETH9 address: ${pmWETH}`);
+            console.log(`Matches our WETH_ADDRESS: ${pmWETH === WETH_ADDRESS}`);
+        }
+    } catch (error) {
+        console.error(`Error accessing Position Manager contract at ${POSITION_MANAGER_ADDRESS}:`, error.message);
+    }
+
+    // Check what WETH address is configured in the router
+    try {
+        const router = new quais.Contract(ROUTER_ADDRESS, SwapRouterABI, wallet);
+        console.log(`Router contract address: ${ROUTER_ADDRESS}`);
+        // Try to get WETH9 from router if it has a method to access it
+        if (router.WETH9) {
+            const routerWETH = await router.WETH9();
+            console.log(`Router's WETH9 address: ${routerWETH}`);
+            console.log(`Matches our WETH_ADDRESS: ${routerWETH === WETH_ADDRESS}`);
+        }
+    } catch (error) {
+        console.error(`Error accessing Router contract at ${ROUTER_ADDRESS}:`, error.message);
+    }
+
+    console.log('---- End of WETH9 Address Verification ----\n');
+}
+
+/**
+ * Complete workflow demo for QuaiFlip
  */
 async function runCompleteWorkflow() {
-    try {
-        console.log('\n==== RUNNING COMPLETE UNISWAP V3 WORKFLOW ====');
+    console.log('\n===== QuaiFlip Complete Uniswap V3 Workflow Demo =====');
 
-        // 1. First, wrap QAI to get WQAI
-        await wrapQAI();
+    // Verify WETH9 configuration before proceeding
+    await verifyWETH9AddressConfiguration();
 
-        // 2. Deploy a test token
-        const testTokenAddress = await deployTestToken();
+    // 1. First wrap some QAI
+    await wrapQAI();
 
-        // 3. Create a pool with the test token
-        const poolInfo = await createUniswapPool(testTokenAddress);
+    // 2. Deploy a test token
+    const testTokenAddress = await deployTestToken();
 
-        // 4. Add liquidity to the pool
-        await addLiquidity(poolInfo);
+    // 3. Create a pool with the test token
+    const poolInfo = await createUniswapPool(testTokenAddress);
 
-        // 5. Perform a swap
-        await performSwap(poolInfo);
+    // 4. Add liquidity to the pool
+    await addLiquidity(poolInfo);
 
-        console.log('\n==== WORKFLOW COMPLETED SUCCESSFULLY ====');
-    } catch (error) {
-        console.error('Error running complete workflow:', error);
-    }
+    // 5. Perform a swap
+    await performSwap(poolInfo);
+
+    console.log('\n==== WORKFLOW COMPLETED SUCCESSFULLY ====');
 }
 
 /**
