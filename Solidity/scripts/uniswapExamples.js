@@ -14,6 +14,7 @@ const deploymentData = JSON.parse(
 );
 
 // Contract addresses
+const UNISWAP_ADDRESS_GRINDER_ADDRESS = deploymentData.uniswapAddressGrinder || deploymentData.addressGrinder;
 const WETH_ADDRESS = deploymentData.wethAddress;
 const FACTORY_ADDRESS = deploymentData.factoryAddress;
 const POSITION_MANAGER_ADDRESS = deploymentData.positionManagerAddress;
@@ -25,6 +26,8 @@ const NonfungiblePositionManagerABI = require('../../v3-periphery/artifacts/cont
 const SwapRouterABI = require('../../v3-periphery/artifacts/contracts/SwapRouter.sol/SwapRouter.json').abi;
 const WETH9ABI = require('../artifacts/contracts/WETH9.sol/WETH9.json').abi;
 const IUniswapV3PoolABI = require('../../v3-core/artifacts/contracts/interfaces/IUniswapV3Pool.sol/IUniswapV3Pool.json').abi;
+// Load UniswapAddressGrinder ABI from Solidity/contracts directory
+const UniswapAddressGrinderABI = require('../artifacts/contracts/UniswapAddressGrinder.sol/UniswapAddressGrinder.json').abi;
 
 // Basic ERC20 ABI for tokens that might not have a full ABI available
 const ERC20_ABI = [
@@ -46,11 +49,44 @@ function getWallet() {
     return new quais.Wallet(hre.network.config.accounts[0], provider);
 }
 
+// Helper function to extract deployed address from receipt
+async function extractDeployedAddress(receipt, uniswapAddressGrinderContract) {
+    // Find the deployment event in the logs
+    let deployedAddress
+    for (const log of receipt.logs) {
+        try {
+            // Parse the log as the ContractDeployed event
+            const parsedLog = uniswapAddressGrinderContract.interface.parseLog(log)
+            if (parsedLog.name === 'ContractDeployed') {
+                deployedAddress = parsedLog.args.deployedAddress
+                console.log(`Found ContractDeployed event with address: ${deployedAddress}`)
+                return deployedAddress
+            }
+        } catch (error) {
+            // Not our event, continue
+            continue
+        }
+    }
+
+    // Fallback if event not found
+    console.log('ContractDeployed event not found, trying to extract address from logs...')
+    // Try to get the address from to/address field of the logs
+    for (const log of receipt.logs) {
+        if (log.address && log.address !== uniswapAddressGrinderContract.address) {
+            deployedAddress = log.address
+            console.log(`Found potential deployed address from logs: ${deployedAddress}`)
+            return deployedAddress
+        }
+    }
+
+    throw new Error('Failed to find deployed contract address')
+}
+
 /**
- * Helper function to deploy a test token for examples
+ * Helper function to deploy a test token for examples using AddressGrinder
  */
 async function deployTestToken(name = "Example Token", symbol = "EXTKN", initialSupply = "1000000") {
-    console.log(`\n---- Helper: Deploying Test Token ${name} ----`);
+    console.log(`\n---- Helper: Deploying Test Token ${name} with Address Grinding ----`);
     const wallet = getWallet();
 
     // Token parameters - now configurable via parameters
@@ -62,29 +98,51 @@ async function deployTestToken(name = "Example Token", symbol = "EXTKN", initial
     console.log(`- Initial Supply: ${quais.formatUnits(initialSupplyParsed, 18)}`);
 
     try {
-        // Generate a mock IPFS hash for metadata (required by Quai Network)
-        const mockIpfsHash = "QmYwAPJzv5CZsnA625s3Xf2nemtYgPpHdWEz79ojWnPbdG";
-        console.log(`Using mock IPFS hash for metadata: ${mockIpfsHash}`);
+        // Load the UniswapAddressGrinder from artifacts
+        const uniswapAddressGrinderArtifact = require('../artifacts/contracts/UniswapAddressGrinder.sol/UniswapAddressGrinder.json');
+        const uniswapAddressGrinder = new quais.Contract(UNISWAP_ADDRESS_GRINDER_ADDRESS, uniswapAddressGrinderArtifact.abi, wallet);
+        console.log(`Using UniswapAddressGrinder at: ${UNISWAP_ADDRESS_GRINDER_ADDRESS}`);
 
         // Load the TestToken artifact
         const TestTokenArtifact = require('../artifacts/contracts/TestToken.sol/TestToken.json');
 
-        // Create the factory
-        const TestTokenFactory = new quais.ContractFactory(
-            TestTokenArtifact.abi,
-            TestTokenArtifact.bytecode,
-            wallet,
-            mockIpfsHash // Pass the IPFS hash directly here
+        // Prepare constructor arguments using AbiCoder
+        const abiCoder = new quais.AbiCoder();
+        const constructorArgs = abiCoder.encode(
+            ['string', 'string', 'uint256'],
+            [name, symbol, initialSupplyParsed]
         );
 
-        // Deploy the token
-        const token = await TestTokenFactory.deploy(name, symbol, initialSupplyParsed);
-        console.log(`Transaction hash: ${token.deploymentTransaction().hash}`);
+        // Use a random salt or one based on token name
+        const salt = quais.keccak256(quais.toUtf8Bytes(`${name}_${symbol}_SALT_${Date.now()}`));
 
-        await token.waitForDeployment();
-        const tokenAddress = await token.getAddress();
+        console.log(`Deploying ${name} token using UniswapAddressGrinder...`);
+        const tx = await uniswapAddressGrinder.deployContract(
+            TestTokenArtifact.bytecode,
+            constructorArgs,
+            salt,
+            { gasLimit: 5000000 } // Increased gas limit for grinding
+        );
+
+        console.log(`Transaction hash: ${tx.hash}`);
+        const receipt = await tx.wait();
+
+        // Extract the deployed address from the receipt
+        const tokenAddress = await extractDeployedAddress(receipt, uniswapAddressGrinder);
 
         console.log(`Test token deployed at: ${tokenAddress}`);
+
+        // Verify address is Quai compatible
+        const firstByte = parseInt(tokenAddress.slice(2, 4), 16);
+        const secondByte = parseInt(tokenAddress.slice(4, 6), 16);
+
+        if (firstByte === 0 && secondByte <= 127) {
+            console.log(`✅ Token address is in the correct Quai Network shard range!`);
+        } else {
+            console.log(`⚠️ Warning: Token address may not be in the correct Quai Network shard range.`);
+            console.log(`First byte: ${firstByte} (should be 0), Second byte: ${secondByte} (should be ≤ 127)`);
+        }
+
         return tokenAddress;
     } catch (error) {
         console.error('Error deploying test token:', error);
@@ -283,12 +341,14 @@ async function addLiquidity(poolInfo) {
     const { poolAddress, token0, token1, fee } = poolInfo;
     const wallet = getWallet();
 
+    console.log(poolAddress)
+
     const token0Contract = new quais.Contract(token0, token0 === WETH_ADDRESS ? WETH9ABI : ERC20_ABI, wallet);
     const token1Contract = new quais.Contract(token1, token1 === WETH_ADDRESS ? WETH9ABI : ERC20_ABI, wallet);
     const positionManager = new quais.Contract(POSITION_MANAGER_ADDRESS, NonfungiblePositionManagerABI, wallet);
     const poolContract = new quais.Contract(poolAddress, IUniswapV3PoolABI, wallet);
 
-    // Check token decimals
+    // Get token decimals
     const token0Decimals = await token0Contract.decimals();
     const token1Decimals = await token1Contract.decimals();
     console.log(`Token0 decimals: ${token0Decimals}, Token1 decimals: ${token1Decimals}`);
@@ -306,51 +366,122 @@ async function addLiquidity(poolInfo) {
     const slot0 = await poolContract.slot0();
     console.log(`Current tick: ${slot0.tick}, sqrtPriceX96: ${slot0.sqrtPriceX96.toString()}`);
 
-    // Use a narrower tick range
+    // Define several tick range options to try if initial attempt fails
     const TICK_SPACING = 60;
-    const tickLower = -60;
-    const tickUpper = 60;
+    // Convert tick to a regular JavaScript number to avoid BigInt conversion issues
+    const currentTick = parseInt(slot0.tick.toString());
 
-    // Use larger amounts
-    const amount0Desired = quais.parseUnits("10000", token0Decimals);
-    const amount1Desired = quais.parseUnits("10000", token1Decimals);
-    const amount0Min = quais.parseUnits(
-        (Number(quais.formatUnits(amount0Desired, token0Decimals)) * 0.95).toFixed(Number(token0Decimals)),
-        token0Decimals
-    );
-    const amount1Min = quais.parseUnits(
-        (Number(quais.formatUnits(amount1Desired, token1Decimals)) * 0.95).toFixed(Number(token1Decimals)),
-        token1Decimals
-    );
+    // Array of strategies to try
+    const strategies = [
+        {
+            name: "Narrow range (5 spacings)",
+            tickLower: Math.floor(currentTick / TICK_SPACING) * TICK_SPACING - (5 * TICK_SPACING),
+            tickUpper: Math.floor(currentTick / TICK_SPACING) * TICK_SPACING + (5 * TICK_SPACING),
+            amount0: "1000",
+            amount1: "1000",
+            slippage: 0.9 // 10% slippage tolerance
+        },
+        {
+            name: "Very narrow range (2 spacings)",
+            tickLower: Math.floor(currentTick / TICK_SPACING) * TICK_SPACING - (2 * TICK_SPACING),
+            tickUpper: Math.floor(currentTick / TICK_SPACING) * TICK_SPACING + (2 * TICK_SPACING),
+            amount0: "1000",
+            amount1: "1000",
+            slippage: 0.8 // 20% slippage tolerance
+        },
+        {
+            name: "Exact current price with minimal range",
+            tickLower: Math.floor(currentTick / TICK_SPACING) * TICK_SPACING,
+            tickUpper: Math.floor(currentTick / TICK_SPACING) * TICK_SPACING + TICK_SPACING,
+            amount0: "500",
+            amount1: "500",
+            slippage: 0.7 // 30% slippage tolerance
+        },
+        {
+            name: "Zero-centered range",
+            tickLower: -TICK_SPACING * 2,
+            tickUpper: TICK_SPACING * 2,
+            amount0: "500",
+            amount1: "500",
+            slippage: 0.6 // 40% slippage tolerance
+        }
+    ];
 
-    console.log(`Adding liquidity: ${quais.formatUnits(amount0Desired, token0Decimals)} of Token0, ${quais.formatUnits(amount1Desired, token1Decimals)} of Token1`);
-    console.log(`Tick range: ${tickLower} to ${tickUpper}`);
+    // Try each strategy until one succeeds
+    let lastError = null;
 
-    const mintParams = {
-        token0: token0,
-        token1: token1,
-        fee: fee,
-        tickLower: tickLower,
-        tickUpper: tickUpper,
-        amount0Desired: amount0Desired,
-        amount1Desired: amount1Desired,
-        amount0Min: amount0Min,
-        amount1Min: amount1Min,
-        recipient: wallet.address,
-        deadline: Math.floor(Date.now() / 1000) + 60 * 20
-    };
+    for (const strategy of strategies) {
+        console.log(`\nTrying strategy: ${strategy.name}`);
 
-    try {
-        console.log('Adding liquidity...');
-        const tx = await positionManager.mint(mintParams, { gasLimit: 5000000 });
-        console.log(`Transaction hash: ${tx.hash}`);
-        const receipt = await tx.wait();
-        console.log(`Liquidity added successfully!`);
-        return receipt;
-    } catch (error) {
-        console.error('Error adding liquidity:', error.message, error.data);
-        throw error;
+        const tickLower = strategy.tickLower;
+        const tickUpper = strategy.tickUpper;
+
+        console.log(`Using tick range: ${tickLower} to ${tickUpper} (${tickUpper - tickLower} ticks wide)`);
+        console.log(`Current price is at tick: ${currentTick}`);
+
+        const amount0Desired = quais.parseUnits(strategy.amount0, token0Decimals);
+        const amount1Desired = quais.parseUnits(strategy.amount1, token1Decimals);
+
+        const amount0Min = quais.parseUnits(
+            (Number(strategy.amount0) * strategy.slippage).toFixed(Number(token0Decimals)),
+            token0Decimals
+        );
+        const amount1Min = quais.parseUnits(
+            (Number(strategy.amount1) * strategy.slippage).toFixed(Number(token1Decimals)),
+            token1Decimals
+        );
+
+        console.log(`Adding liquidity: ${strategy.amount0} of Token0, ${strategy.amount1} of Token1`);
+        console.log(`Slippage tolerance: ${(1 - strategy.slippage) * 100}%`);
+
+        const mintParams = {
+            token0: token0,
+            token1: token1,
+            fee: fee,
+            tickLower: tickLower,
+            tickUpper: tickUpper,
+            amount0Desired: amount0Desired,
+            amount1Desired: amount1Desired,
+            amount0Min: amount0Min,
+            amount1Min: amount1Min,
+            recipient: wallet.address,
+            deadline: Math.floor(Date.now() / 1000) + 60 * 20
+        };
+
+        try {
+            console.log('Adding liquidity...');
+            console.log('Mint parameters:', JSON.stringify({
+                ...mintParams,
+                amount0Desired: quais.formatUnits(amount0Desired, token0Decimals),
+                amount1Desired: quais.formatUnits(amount1Desired, token1Decimals),
+                amount0Min: quais.formatUnits(amount0Min, token0Decimals),
+                amount1Min: quais.formatUnits(amount1Min, token1Decimals),
+            }, null, 2));
+
+            const tx = await positionManager.mint(mintParams, { gasLimit: 8000000 }); // Increased gas limit
+            console.log(`Transaction hash: ${tx.hash}`);
+            const receipt = await tx.wait();
+            console.log(`Liquidity added successfully with strategy: ${strategy.name}!`);
+            return receipt;
+        } catch (error) {
+            console.error(`Strategy ${strategy.name} failed:`, error.message);
+
+            // Try to decode the error if possible
+            if (error.data) {
+                console.error('Error data:', error.data);
+            }
+
+            // Save the last error to throw if all strategies fail
+            lastError = error;
+
+            // Continue to the next strategy
+            console.log(`Trying next strategy...\n`);
+        }
     }
+
+    // If we got here, all strategies failed
+    console.error('All liquidity provision strategies failed');
+    throw lastError;
 }
 
 /**
