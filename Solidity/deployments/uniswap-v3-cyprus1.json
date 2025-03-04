@@ -1,11 +1,11 @@
 {
   "network": "cyprus1",
   "chainId": 15000,
-  "uniswapAddressGrinder": "0x001832e7ceFd75Abdc1003C07c3A92cF8E28249d",
-  "wethAddress": "0x001dA0190B3c0875E4E7bc945e43b019b3aF355A",
-  "factoryAddress": "0x002C888ECd8fdc79b8405555A9488307e1035cE3",
-  "positionDescriptorAddress": "0x0003Ea351fe743ede69cce7F754244528Ad6B311",
-  "positionManagerAddress": "0x00016F5788e748B0636EC98BF5658a831BEF2896",
-  "routerAddress": "0x0008391976F613D31B3fE9B7a428b61B946688c7",
-  "timestamp": "2025-03-04T02:51:44.989Z"
+  "uniswapAddressGrinder": "0x0033Aae7E8805a5572fF09845a9D8FDEC80f0652",
+  "wethAddress": "0x00637C1bCbAd1b98b70beE87845E57D3fE0d9180",
+  "factoryAddress": "0x0058e567f73e6f4C92fADA06bf48c679A736db28",
+  "positionDescriptorAddress": "0x00764f22aDd47B25412E9e2E46dE1883996D91e7",
+  "positionManagerAddress": "0x00468FE6Bf84443a6935a9Ea14c18be8F15B005F",
+  "routerAddress": "0x0013A2435029b181eEed44348D2479AB68a00eC1",
+  "timestamp": "2025-03-04T21:20:43.834Z"
 }

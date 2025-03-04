@@ -1,42 +1,53 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 pragma solidity 0.8.20;
 
-import './ERC20.sol';
+contract WETH9 {
+  string public name = 'Wrapped Ether';
+  string public symbol = 'WETH';
+  uint8 public decimals = 18;
 
-/**
- * @title WETH9
- * @dev Wrapped Ether implementation for Quai Network
- * This contract allows users to wrap their native QAI into an ERC20 token
- * This is needed for DeFi protocols like Uniswap v3 that require ERC20 tokens
- */
-contract WETH9 is ERC20 {
-  event Deposit(address indexed dst, uint wad);
-  event Withdrawal(address indexed src, uint wad);
+  event Approval(address indexed owner, address indexed spender, uint256 value);
+  event Transfer(address indexed from, address indexed to, uint256 value);
+  event Deposit(address indexed dst, uint256 amount);
+  event Withdrawal(address indexed src, uint256 amount);
 
-  constructor() ERC20('Wrapped QAI', 'WQAI', 0) {}
+  mapping(address => uint256) public balanceOf;
+  mapping(address => mapping(address => uint256)) public allowance;
 
-  /**
-   * @notice Deposit native token to get wrapped token
-   */
   function deposit() public payable {
-    _mint(msg.sender, msg.value);
+    balanceOf[msg.sender] += msg.value;
     emit Deposit(msg.sender, msg.value);
   }
 
-  /**
-   * @notice Withdraw wrapped token to get native token
-   * @param wad Amount to withdraw
-   */
-  function withdraw(uint wad) public {
-    require(balanceOf(msg.sender) >= wad, 'WETH9: insufficient balance');
-    // Use transfer to remove tokens from sender's balance
-    _transfer(msg.sender, address(this), wad);
-    // Send the equivalent amount of native tokens
-    payable(msg.sender).transfer(wad);
-    emit Withdrawal(msg.sender, wad);
+  function withdraw(uint256 amount) public {
+    require(balanceOf[msg.sender] >= amount, 'WETH: insufficient balance');
+    balanceOf[msg.sender] -= amount;
+    payable(msg.sender).transfer(amount);
+    emit Withdrawal(msg.sender, amount);
   }
 
-  // Allow receiving native token
+  function approve(address spender, uint256 amount) public returns (bool) {
+    allowance[msg.sender][spender] = amount;
+    emit Approval(msg.sender, spender, amount);
+    return true;
+  }
+
+  function transfer(address to, uint256 amount) public returns (bool) {
+    return transferFrom(msg.sender, to, amount);
+  }
+
+  function transferFrom(address from, address to, uint256 amount) public returns (bool) {
+    require(balanceOf[from] >= amount, 'WETH: insufficient balance');
+    if (from != msg.sender && allowance[from][msg.sender] != type(uint256).max) {
+      require(allowance[from][msg.sender] >= amount, 'WETH: insufficient allowance');
+      allowance[from][msg.sender] -= amount;
+    }
+    balanceOf[from] -= amount;
+    balanceOf[to] += amount;
+    emit Transfer(from, to, amount);
+    return true;
+  }
+
   receive() external payable {
     deposit();
   }
