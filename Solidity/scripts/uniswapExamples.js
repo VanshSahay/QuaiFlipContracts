@@ -98,7 +98,7 @@ async function deployTestToken(name = "Example Token", symbol = "EXTKN", initial
     const wallet = getWallet();
 
     // Token parameters - now configurable via parameters
-    const initialSupplyParsed = quais.parseUnits(initialSupply, 18); // 1 million tokens
+    const initialSupplyParsed = quais.parseQuai(initialSupply);
 
     console.log(`Deploying test token with parameters:`);
     console.log(`- Name: ${name}`);
@@ -225,7 +225,7 @@ async function wrapQAI() {
     console.log(`Initial WQAI balance: ${quais.formatUnits(initialBalance, 18)} WQAI`);
 
     // Amount to wrap (e.g., 1 QAI)
-    const wrapAmount = quais.parseUnits("0.1", 18);
+    const wrapAmount = quais.parseQuai("0.1");
 
     console.log(`Wrapping ${quais.formatUnits(wrapAmount, 18)} QAI...`);
 
@@ -505,8 +505,8 @@ async function addLiquidity(poolInfo) {
         console.log(`Using tick range: ${lowerTick} to ${upperTick} (with spacing ${tickSpacing})`);
 
         // Amount of tokens to add as liquidity
-        const token0Amount = quais.parseUnits("0.01", token0Decimals);
-        const token1Amount = quais.parseUnits("0.01", token1Decimals);
+        const token0Amount = quais.parseQuai("0.01", token0Decimals);
+        const token1Amount = quais.parseQuai("0.01", token1Decimals);
         console.log(`Adding ${quais.formatUnits(token0Amount, token0Decimals)} token0 and ${quais.formatUnits(token1Amount, token1Decimals)} token1 as liquidity`);
 
         // Add liquidity to pool using the position manager
@@ -625,7 +625,8 @@ async function performSwap(poolInfo) {
 
     // Define swap parameters
     // In this example, we'll swap token0 for token1
-    const amountIn = quais.parseUnits("1", 18); // 1 token
+    const amount = "1"; // Amount to swap
+    const amountIn = quais.parseQuai(amount);
 
     try {
         console.log(`Approving router to spend tokens...`);
