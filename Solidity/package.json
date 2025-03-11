@@ -7,7 +7,7 @@
 		"bn.js": "^5.2.1",
 		"dotenv": "^16.4.5",
 		"hardhat": "^2.19.5",
-		"quais": "^1.0.0-alpha.36"
+		"quais": "^1.0.0-alpha.40"
 	},
 	"devDependencies": {
 		"@nomicfoundation/hardhat-toolbox": "^5.0.0"

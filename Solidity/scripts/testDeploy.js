@@ -61,39 +61,6 @@ function processBytecodeForDeployment(bytecode) {
     return '0x' + bytecodeStr;
 }
 
-async function deployWETH9WithGrinder(uniswapAddressGrinderContract, provider, wallet) {
-    console.log('Deploying WETH9 using UniswapAddressGrinder...')
-
-    // Get the WETH9 bytecode and abi
-    const WETH9Artifact = require('../artifacts/contracts/WETH9.sol/WETH9.json')
-
-    // WETH9 has no constructor arguments
-    const constructorArgs = '0x'
-
-    // Use a random salt or a deterministic one
-    const salt = quais.keccak256(quais.toUtf8Bytes('WETH9_SALT_' + Date.now()))
-
-    // Deploy WETH9 using the grinder
-    const tx = await uniswapAddressGrinderContract.deployContract(
-        WETH9Artifact.bytecode,
-        constructorArgs,
-        salt,
-        { gasLimit: 5000000 }
-    )
-    const receipt = await tx.wait()
-
-    // Extract the deployed address
-    const wethAddress = "0x005c46f661Baef20671943f2b4c087Df3E7CEb13"
-
-    console.log(typeof wethAddress)
-
-    console.log(`WETH9 deployed to: ${wethAddress}`)
-    // Verify the address is Quai compatible
-    await verifyQuaiAddress(wethAddress)
-
-    return wethAddress
-}
-
 async function deployUniswapV3Core(uniswapAddressGrinderContract, provider, wallet) {
     console.log('Deploying UniswapV3Factory using UniswapAddressGrinder...')
 
@@ -138,7 +105,7 @@ function formatBytes32String(text) {
     return hex;
 }
 
-async function deployUniswapV3Periphery(uniswapAddressGrinderContract, factoryAddress, wethAddress, provider, wallet) {
+async function deployUniswapV3Periphery(uniswapAddressGrinderContract, factoryAddress, provider, wallet) {
     console.log('Deploying UniswapV3 Periphery contracts using UniswapAddressGrinder...')
 
     // 1. First deploy the NFTDescriptor library
@@ -175,7 +142,7 @@ async function deployUniswapV3Periphery(uniswapAddressGrinderContract, factoryAd
     // Encode constructor arguments safely using AbiCoder.encode
     const positionDescriptorConstructorArgs = quais.AbiCoder.defaultAbiCoder().encode(
         ['address', 'bytes32'],
-        [wethAddress, nativeCurrencyLabel]
+        [factoryAddress, nativeCurrencyLabel]
     )
 
     // Use a random salt
@@ -200,7 +167,6 @@ async function deployUniswapV3Periphery(uniswapAddressGrinderContract, factoryAd
     const processedPositionDescriptorBytecode = processBytecodeForDeployment(unlinkedBytecode);
 
     console.log('Deploying NonfungibleTokenPositionDescriptor with constructor args:', positionDescriptorConstructorArgs)
-    console.log('WETH address:', wethAddress)
 
     // Deploy with fixed and linked bytecode format
     const positionDescriptorTx = await uniswapAddressGrinderContract.deployContract(
@@ -223,8 +189,8 @@ async function deployUniswapV3Periphery(uniswapAddressGrinderContract, factoryAd
 
     // Prepare constructor arguments
     const positionManagerConstructorArgs = quais.AbiCoder.defaultAbiCoder().encode(
-        ['address', 'address', 'address'],
-        [factoryAddress, wethAddress, positionDescriptorAddress]
+        ['address', 'address'],
+        [factoryAddress, positionDescriptorAddress]
     )
 
     // Use a random salt
@@ -250,8 +216,8 @@ async function deployUniswapV3Periphery(uniswapAddressGrinderContract, factoryAd
 
     // Prepare constructor arguments
     const routerConstructorArgs = quais.AbiCoder.defaultAbiCoder().encode(
-        ['address', 'address'],
-        [factoryAddress, wethAddress]
+        ['address'],
+        [factoryAddress]
     )
 
     // Use a random salt
@@ -315,11 +281,6 @@ async function deployUniswapV3Full() {
     const uniswapAddressGrinder = new quais.Contract(uniswapAddressGrinderAddress, uniswapAddressGrinderArtifact.abi, wallet)
     console.log('--------------------------------------')
 
-    // Step 1: Deploy WETH9 using UniswapAddressGrinder
-    console.log('Step 1: Deploying WETH9...')
-    const wethAddress = await deployWETH9WithGrinder(uniswapAddressGrinder, provider, wallet)
-    console.log('--------------------------------------')
-
     // Step 2: Deploy v3-core (UniswapV3Factory) using UniswapAddressGrinder
     console.log('Step 2: Deploying UniswapV3Factory...')
     const factoryAddress = await deployUniswapV3Core(uniswapAddressGrinder, provider, wallet)
@@ -327,7 +288,7 @@ async function deployUniswapV3Full() {
 
     // Step 3: Deploy v3-periphery contracts using UniswapAddressGrinder
     console.log('Step 3: Deploying v3-periphery contracts...')
-    const peripheryAddresses = await deployUniswapV3Periphery(uniswapAddressGrinder, factoryAddress, wethAddress, provider, wallet)
+    const peripheryAddresses = await deployUniswapV3Periphery(uniswapAddressGrinder, factoryAddress, provider, wallet)
     console.log('--------------------------------------')
 
     // Step 4: Save all deployed addresses to a JSON file
@@ -335,7 +296,6 @@ async function deployUniswapV3Full() {
         network: hre.network.name,
         chainId: hre.network.config.chainId,
         uniswapAddressGrinder: uniswapAddressGrinderAddress,
-        wethAddress: wethAddress,
         factoryAddress: factoryAddress,
         positionDescriptorAddress: peripheryAddresses.positionDescriptor,
         positionManagerAddress: peripheryAddresses.positionManager,
@@ -356,7 +316,6 @@ async function deployUniswapV3Full() {
         JSON.stringify(deploymentData, null, 2)
     )
 
-    console.log(quais.getZoneForAddress(wethAddress))
     console.log(quais.getZoneForAddress(factoryAddress))
     console.log(quais.getZoneForAddress(peripheryAddresses.positionDescriptor))
     console.log(quais.getZoneForAddress(peripheryAddresses.positionManager))
@@ -365,7 +324,6 @@ async function deployUniswapV3Full() {
     console.log('Deployment complete! Addresses saved to:', deploymentFilePath)
     console.log('Deployment summary:')
     console.log('- UniswapAddressGrinder:', uniswapAddressGrinderAddress)
-    console.log('- WETH9:', wethAddress)
     console.log('- Factory:', factoryAddress)
     console.log('- Position Descriptor:', peripheryAddresses.positionDescriptor)
     console.log('- Position Manager:', peripheryAddresses.positionManager)
