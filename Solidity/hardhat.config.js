@@ -55,7 +55,7 @@ module.exports = {
         },
       },
       {
-        version: '0.8.0',
+        version: '0.8.7',
         settings: {
           optimizer: {
             enabled: true,
@@ -65,7 +65,7 @@ module.exports = {
             bytecodeHash: 'ipfs',
             useLiteralContent: true, // Include the source code in the metadata
           },
-          evmVersion: 'berlin',
+          evmVersion: 'london',
         },
       },
       {

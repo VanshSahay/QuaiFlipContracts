@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MIT
-pragma solidity 0.8.0;
+pragma solidity 0.8.7;
 
 /**
  * @title TestToken
@@ -26,10 +26,10 @@ contract TestToken {
    * @param symbol_ The symbol of the token
    * @param initialSupply_ The initial token supply
    */
-  constructor(string memory name_, string memory symbol_, uint256 initialSupply_) {
+  constructor(string memory name_, string memory symbol_, uint256 initialSupply_, address owner) {
     _name = name_;
     _symbol = symbol_;
-    _mint(msg.sender, initialSupply_);
+    _mint(owner, initialSupply_);
   }
 
   /**

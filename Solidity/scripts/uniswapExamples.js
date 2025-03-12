@@ -117,8 +117,8 @@ async function deployTestToken(name = "Example Token", symbol = "EXTKN", initial
         // Prepare constructor arguments using AbiCoder
         const abiCoder = new quais.AbiCoder();
         const constructorArgs = abiCoder.encode(
-            ['string', 'string', 'uint256'],
-            [name, symbol, initialSupplyParsed]
+            ['string', 'string', 'uint256', 'address'],
+            [name, symbol, initialSupplyParsed, wallet.address]
         );
 
         // Use a random salt or one based on token name
@@ -509,6 +509,13 @@ async function addLiquidity(poolInfo) {
         const token1Amount = quais.parseQuai("0.01", token1Decimals);
         console.log(`Adding ${quais.formatUnits(token0Amount, token0Decimals)} token0 and ${quais.formatUnits(token1Amount, token1Decimals)} token1 as liquidity`);
 
+
+        const balance0 = await token0Contract.balanceOf(wallet.address);
+        const balance1 = await token1Contract.balanceOf(wallet.address);
+        console.log(`Balance0: ${balance0}, Balance1: ${balance1}`);
+        if (balance0 < token0Amount || balance1 < token1Amount) {
+            throw new Error("Insufficient token balance");
+        }
         // Add liquidity to pool using the position manager
         console.log('Adding liquidity to pool...');
 

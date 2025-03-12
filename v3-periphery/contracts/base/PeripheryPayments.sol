@@ -10,13 +10,9 @@ import '../libraries/TransferHelper.sol';
 
 import './PeripheryImmutableState.sol';
 
-import 'hardhat/console.sol';
-
 abstract contract PeripheryPayments is IPeripheryPayments, PeripheryImmutableState {
     receive() external payable {
-        console.log('WETH9 from contract: ', WETH9);
-        console.log('msg.sender: ', msg.sender);
-        require(msg.sender == WETH9, 'Not WETH9');
+        require(msg.sender == WETH9, string(abi.encodePacked('Not WETH9: ', msg.sender)));
     }
 
     /// @inheritdoc IPeripheryPayments
