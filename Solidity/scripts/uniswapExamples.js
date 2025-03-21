@@ -34,18 +34,8 @@ const NonfungiblePositionManagerABI = require('../../v3-periphery/artifacts/cont
 const SwapRouterABI = require('../../v3-periphery/artifacts/contracts/SwapRouter.sol/SwapRouter.json').abi;
 const WETH9ABI = require('../artifacts/contracts/WETH9.sol/WETH9.json').abi;
 const IUniswapV3PoolABI = require('../../v3-core/artifacts/contracts/interfaces/IUniswapV3Pool.sol/IUniswapV3Pool.json').abi;
-// Load UniswapAddressGrinder ABI from Solidity/contracts directory
-const UniswapAddressGrinderABI = require('../artifacts/contracts/UniswapAddressGrinder.sol/UniswapAddressGrinder.json').abi;
 
-// Basic ERC20 ABI for tokens that might not have a full ABI available
-const ERC20_ABI = [
-    "function name() view returns (string)",
-    "function symbol() view returns (string)",
-    "function decimals() view returns (uint8)",
-    "function balanceOf(address account) view returns (uint256)",
-    "function transfer(address recipient, uint256 amount) returns (bool)",
-    "function approve(address spender, uint256 amount) returns (bool)"
-];
+const ERC20_ABI = require('../artifacts/contracts/TestToken.sol/TestToken.json').abi;
 
 // Setup provider and wallet
 function getProvider() {
@@ -398,6 +388,11 @@ async function createUniswapPool(token1Address, token2Address) {
             console.log(`First byte: ${firstByte} (should be 0), Second byte: ${secondByte} (should be ≤ 127)`);
         }
 
+        const poolAbi = ["function slot0() view returns (uint160, int24, uint16, uint16, uint16, uint8, bool)"];
+        const poolContract = new quais.Contract(poolAddress, poolAbi, wallet);
+        const slot0 = await poolContract.slot0();
+        console.log(`Slot0: ${slot0}`);
+
         return {
             poolAddress,
             token0,
@@ -509,6 +504,9 @@ async function addLiquidity(poolInfo) {
         const token1Amount = quais.parseQuai("0.01", token1Decimals);
         console.log(`Adding ${quais.formatUnits(token0Amount, token0Decimals)} token0 and ${quais.formatUnits(token1Amount, token1Decimals)} token1 as liquidity`);
 
+        const factoryAddress = await positionManager.getFactory();
+        console.log(`Factory address: ${factoryAddress}`);
+
 
         const balance0 = await token0Contract.balanceOf(wallet.address);
         const balance1 = await token1Contract.balanceOf(wallet.address);
@@ -516,6 +514,10 @@ async function addLiquidity(poolInfo) {
         if (balance0 < token0Amount || balance1 < token1Amount) {
             throw new Error("Insufficient token balance");
         }
+
+        const allowance0 = await token0Contract.allowance(wallet.address, POSITION_MANAGER_ADDRESS);
+        const allowance1 = await token1Contract.allowance(wallet.address, POSITION_MANAGER_ADDRESS);
+        console.log(`Allowance0: ${allowance0}, Allowance1: ${allowance1}`);
         // Add liquidity to pool using the position manager
         console.log('Adding liquidity to pool...');
 
@@ -531,7 +533,7 @@ async function addLiquidity(poolInfo) {
             amount0Min: BigInt(0),
             amount1Min: BigInt(0),
             recipient: wallet.address,
-            deadline: BigInt(Math.floor(Date.now() / 1000) + 60 * 10) // 10 minutes
+            deadline: BigInt(Math.floor(Date.now() / 1000) + 60 * 60 * 24) // 1 day
         };
 
         console.log('Mint parameters:', JSON.stringify(mintParams, (key, value) =>
