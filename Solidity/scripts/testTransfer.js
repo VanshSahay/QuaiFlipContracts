@@ -5,7 +5,7 @@ const wallet = new quais.Wallet(hre.network.config.accounts[0], provider);
 
 const tokenAbi = ["function allowance(address owner, address spender) external view returns (uint256)", "function transferFrom(address from, address to, uint256 amount) external returns (bool)", "function approve(address spender, uint256 amount) external returns (bool)"];
 
-const token0 = new quais.Contract("0x003010921715009b44864324e6dB9BAa236bb7d4", tokenAbi, wallet);
+const token0 = new quais.Contract("0x007b800107662b0D1817Df5bc0071a035Bc5f713", tokenAbi, wallet);
 
 
 async function testTransferFrom() {
@@ -29,7 +29,7 @@ async function testTransferFrom() {
     console.log(allowanceAfter.toString());
 
     const tx0 = await testTransfer.testTransferFrom(
-        "0x003010921715009b44864324e6dB9BAa236bb7d4",
+        "0x007b800107662b0D1817Df5bc0071a035Bc5f713",
         "0x001edD34e1255447fEFA24766c555B9d0D0c4cf1",
         "0x0067d72f14cF8452a1841Ac2E55F3036E377c7a1",
         amount

@@ -54,6 +54,7 @@ abstract contract LiquidityManagement is IUniswapV3MintCallback, PeripheryImmuta
         });
 
         pool = IUniswapV3Pool(IUniswapV3Factory(factory).getPool(poolKey.token0, poolKey.token1, poolKey.fee));
+        require(address(pool) != address(0), 'Pool does not exist');
 
         // compute the liquidity amount
         {

@@ -543,15 +543,12 @@ async function addLiquidity(poolInfo) {
         tx = await positionManager.mint(
             mintParams,
             {
-                gasLimit: 12000000  // Increased gas limit
+                gasLimit: 10000000  // Increased gas limit
             }
         );
 
         console.log(`Add liquidity transaction hash: ${tx.hash}`);
         const receipt = await tx.wait();
-
-        // Trace the transaction to look for "Not WETH9" errors
-        await traceTransaction(tx.hash);
 
         // Extract tokenId from events
         const mintedEvent = receipt.events.find(event => event.event === 'IncreaseLiquidity');
@@ -932,4 +929,8 @@ if (require.main === module) {
             console.error('Error running examples:', error);
         }
     })();
-} 
+}
+
+// EVENT LOG
+// HARDCODED pool address
+// instead of poolkey.token0 use params.token0 etc
